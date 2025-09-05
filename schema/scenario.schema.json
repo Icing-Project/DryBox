@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://icing.dev/drybox/schema/scenario.schema.json",
+  "title": "DryBox v1 Scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mode": { "type": "string", "enum": ["audio", "byte"], "default": "audio" },
+    "duration_ms": { "type": "integer", "minimum": 1, "default": 60000 },
+    "seed": { "type": "integer", "default": 0 },
+    "frame_ms": { "type": "integer", "minimum": 5, "maximum": 60, "default": 20 },
+
+    "bearer": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["telco_volte_evs", "telco_cs_gsm", "telco_pstn_g711", "ott_udp"]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "telco_volte_evs" } } },
+          "then": {
+            "properties": {
+              "latency_ms": { "type": "integer" },
+              "jitter_ms": { "type": "integer" },
+              "loss_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+              "reorder_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+              "ge_p_good_bad": { "type": "number", "minimum": 0, "maximum": 1 },
+              "ge_p_bad_good": { "type": "number", "minimum": 0, "maximum": 1 },
+              "mtu_bytes": { "type": "integer", "minimum": 16 },
+              "frame_ms": { "type": "integer", "minimum": 5, "maximum": 60 }
+            },
+            "additionalProperties": true
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "telco_cs_gsm" } } },
+          "then": {
+            "properties": {
+              "latency_ms": { "type": "integer" },
+              "burst_loss_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+              "burst_ms_mean": { "type": "integer", "minimum": 1 },
+              "handover_interval_ms_mean": { "type": "integer", "minimum": 1 },
+              "amr_mode_switch": { "type": "boolean" }
+            },
+            "additionalProperties": true
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "telco_pstn_g711" } } },
+          "then": {
+            "properties": {
+              "latency_ms": { "type": "integer" },
+              "hum_hz": { "type": "number" },
+              "hum_snr_db": { "type": "number" },
+              "line_noise_snr_db": { "type": "number" }
+            },
+            "additionalProperties": true
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ott_udp" } } },
+          "then": {
+            "properties": {
+              "latency_ms": { "type": "integer" },
+              "jitter_ms": { "type": "integer" },
+              "loss_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+              "reorder_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+              "mtu_bytes": { "type": "integer", "minimum": 16 },
+              "frame_ms": { "type": "integer", "minimum": 5, "maximum": 60 }
+            },
+            "additionalProperties": true
+          }
+        }
+      ]
+    },
+
+    "channel": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["awgn", "fading"] },
+        "snr_db": {
+          "oneOf": [
+            { "type": "number" },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "number" }
+            }
+          ]
+        },
+        "fd_hz": { "type": "number" },
+        "L": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": true
+    },
+
+    "vocoder": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["evs13k2_mock", "amr12k2_mock", "opus_nb_mock"] },
+        "vad_dtx": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+
+    "cfo_hz": { "type": "integer", "default": 0 },
+    "ppm": { "type": "integer", "default": 0 }
+  }
+}
