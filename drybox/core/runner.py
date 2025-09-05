@@ -51,6 +51,7 @@ from drybox.net.bearers import (
 )
 from drybox.net.sar_lite import SARFragmenter, SARReassembler
 
+from drybox.core.crypto_keys import resolve_keypairs, key_id
 
 # --------- Utils: chargement adaptateurs ----------
 def _load_class_from_path(spec: str):
@@ -133,7 +134,7 @@ class Runner:
         self.t_ms: int = 0
 
     # --------- Chargement / lifecycle ----------
-    def _load_adapter(self, spec: str, side: str):
+    def _load_adapter(self, spec: str, side: str, crypto_cfg: Dict[str, Any]):
         cls = _load_class_from_path(spec)
         inst = cls()
 
@@ -152,6 +153,7 @@ class Runner:
             "seed": self.seed,
             "mode": self.scenario.mode,
             "sdu_max_bytes": DEFAULT_SDU_MAX,  # hint v1; override via capabilities côté adapter si utile
+            "crypto": crypto_cfg,
         }
         if hasattr(inst, "init"):
             inst.init(cfg)  # type: ignore[attr-defined]
@@ -181,9 +183,37 @@ class Runner:
 
     # --------- Exécution ----------
     def run(self) -> int:
-        # 0) Charge adaptateurs
-        left, left_caps = self._load_adapter(self.left_adapter_spec, "L")
-        right, right_caps = self._load_adapter(self.right_adapter_spec, "R")
+
+        # --- Résolution des paires de clés ---
+        (l_priv, l_pub, l_prov), (r_priv, r_pub, r_prov) = resolve_keypairs(
+            scenario_crypto=self.scenario.crypto,
+            seed=self.scenario.seed,
+            left_spec=self.left_adapter_spec,
+            right_spec=self.right_adapter_spec,
+        )
+        l_crypto = {
+            "type": "ed25519",
+            "priv": l_priv,
+            "pub": l_pub,
+            "peer_pub": r_pub,
+            "provenance": l_prov,
+            "key_id": key_id(l_pub),
+            "peer_key_id": key_id(r_pub),
+        }
+        r_crypto = {
+            "type": "ed25519",
+            "priv": r_priv,
+            "pub": r_pub,
+            "peer_pub": l_pub,
+            "provenance": r_prov,
+            "key_id": key_id(r_pub),
+            "peer_key_id": key_id(l_pub),
+        }
+
+
+         # --- Charge adaptateurs avec crypto cfg ---
+        left, left_caps = self._load_adapter(self.left_adapter_spec, "L", l_crypto)
+        right, right_caps = self._load_adapter(self.right_adapter_spec, "R", r_crypto)
         self._require_mode_supported(left_caps, right_caps)
 
         # 1) Configure bearer (toujours présent — même en mode audio pour MTU/tempo)
