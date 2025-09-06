@@ -438,10 +438,6 @@ def _write_resolved_yaml(path: pathlib.Path, scen: ScenarioResolved) -> None:
         yaml.safe_dump(doc, fp, sort_keys=False)
 
 
-def load_yaml(path: pathlib.Path) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as fp:
-        return yaml.safe_load(fp)
-
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
 
