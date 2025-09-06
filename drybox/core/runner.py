@@ -155,6 +155,7 @@ class Runner:
             "seed": self.seed,
             "mode": self.scenario.mode,
             "sdu_max_bytes": DEFAULT_SDU_MAX,  # hint v1; override via capabilities côté adapter si utile
+            "out_dir": str(self.out_dir),
             "crypto": crypto_cfg,
         }
         if hasattr(inst, "init"):
@@ -183,6 +184,22 @@ class Runner:
         if not ok:
             raise SystemExit(3)
 
+    def _dump_pubkeys(self, *, l_pub: bytes, r_pub: bytes, l_prov: str, r_prov: str) -> None:
+        """Écrit runs/.../pubkeys.txt (publiques seules) pour faciliter le debug interop."""
+        txt = [
+            "# DryBox public keys (Ed25519) — DO NOT SHARE PRIVATE KEYS",
+            f"L.key_id={key_id(l_pub)}",
+            f"L.pub_hex={l_pub.hex()}",
+            f"L.provenance={l_prov}",
+            f"R.key_id={key_id(r_pub)}",
+            f"R.pub_hex={r_pub.hex()}",
+            f"R.provenance={r_prov}",
+            f"left_adapter={self.left_adapter_spec}",
+            f"right_adapter={self.right_adapter_spec}",
+            "",
+        ]
+        (self.out_dir / "pubkeys.txt").write_text("\n".join(txt), encoding="utf-8")
+
     # --------- Exécution ----------
     def run(self) -> int:
 
@@ -193,6 +210,9 @@ class Runner:
             left_spec=self.left_adapter_spec,
             right_spec=self.right_adapter_spec,
         )
+        # Dump *publics* uniquement
+        self._dump_pubkeys(l_pub=l_pub, r_pub=r_pub, l_prov=l_prov, r_prov=r_prov)
+
         l_crypto = {
             "type": "ed25519",
             "priv": l_priv,
@@ -417,6 +437,10 @@ def _write_resolved_yaml(path: pathlib.Path, scen: ScenarioResolved) -> None:
     with open(path, "w", encoding="utf-8") as fp:
         yaml.safe_dump(doc, fp, sort_keys=False)
 
+
+def load_yaml(path: pathlib.Path) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as fp:
+        return yaml.safe_load(fp)
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
