@@ -39,8 +39,8 @@ EVENT_TICK = "tick"
 
 # --- Dépendances locales ---
 from drybox.core.metrics import MetricsWriter  # A1
-from drybox.core.capture import DbxCapWriter   # A1
-from drybox.core.scenario import (             # A2
+from drybox.core.capture import DbxCapWriter  # A1
+from drybox.core.scenario import (  # A2
     ScenarioResolved,
 )
 
@@ -52,6 +52,7 @@ from drybox.net.bearers import (
 from drybox.net.sar_lite import SARFragmenter, SARReassembler
 
 from drybox.core.crypto_keys import resolve_keypairs, key_id
+
 
 # --------- Utils: chargement adaptateurs ----------
 def _load_class_from_path(spec: str):
@@ -87,6 +88,7 @@ class AdapterCtx:
     - rng: générateur déterministe côté runner
     - config: dict léger (tick_ms, mode, sdu_max_bytes, seed, side)
     """
+
     def __init__(self, *, side: str, rng: random.Random, get_time_ms, emit_event, config: Dict[str, Any]):
         self.side = side
         self.rng = rng
@@ -104,15 +106,15 @@ class AdapterCtx:
 # --------- Runner ----------
 class Runner:
     def __init__(
-        self,
-        *,
-        scenario: ScenarioResolved,
-        left_adapter_spec: str,
-        right_adapter_spec: str,
-        out_dir: pathlib.Path,
-        tick_ms: int = DEFAULT_TICK_MS,
-        seed: int = DEFAULT_SEED,
-        ui_enabled: bool = True,
+            self,
+            *,
+            scenario: ScenarioResolved,
+            left_adapter_spec: str,
+            right_adapter_spec: str,
+            out_dir: pathlib.Path,
+            tick_ms: int = DEFAULT_TICK_MS,
+            seed: int = DEFAULT_SEED,
+            ui_enabled: bool = True,
     ):
         self.scenario = scenario
         self.left_adapter_spec = left_adapter_spec
@@ -210,8 +212,7 @@ class Runner:
             "peer_key_id": key_id(l_pub),
         }
 
-
-         # --- Charge adaptateurs avec crypto cfg ---
+        # --- Charge adaptateurs avec crypto cfg ---
         left, left_caps = self._load_adapter(self.left_adapter_spec, "L", l_crypto)
         right, right_caps = self._load_adapter(self.right_adapter_spec, "R", r_crypto)
         self._require_mode_supported(left_caps, right_caps)
@@ -267,9 +268,11 @@ class Runner:
                                 payloads = frag_l2r.fragment(sdu)
                             for p in payloads:
                                 bearer_l2r.send(p, now_ms=self.t_ms)
-                                self.cap.write(t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_TX, data=bytes(p))
+                                self.cap.write(t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_TX,
+                                               data=bytes(p))
                                 self.metrics.write_metric(
-                                    t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_TX, rtt_ms_est=float(rtt_est)
+                                    t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_TX,
+                                    rtt_ms_est=float(rtt_est)
                                 )
 
                     # RIGHT -> BEARER
@@ -287,14 +290,17 @@ class Runner:
                                 payloads = frag_r2l.fragment(sdu)
                             for p in payloads:
                                 bearer_r2l.send(p, now_ms=self.t_ms)
-                                self.cap.write(t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_TX, data=bytes(p))
+                                self.cap.write(t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_TX,
+                                               data=bytes(p))
                                 self.metrics.write_metric(
-                                    t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_TX, rtt_ms_est=float(rtt_est)
+                                    t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_TX,
+                                    rtt_ms_est=float(rtt_est)
                                 )
 
                 # (3) Livraison via bearer L->R
                 for dat in bearer_l2r.poll_deliver(self.t_ms):
-                    self.cap.write(t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_RX, data=bytes(dat.payload))
+                    self.cap.write(t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_RX,
+                                   data=bytes(dat.payload))
                     lat = float(self.t_ms - dat.sent_ms)
                     sdu: Optional[bytes] = dat.payload
                     if sar_active:
@@ -316,7 +322,8 @@ class Runner:
 
                 # (4) Livraison via bearer R->L
                 for dat in bearer_r2l.poll_deliver(self.t_ms):
-                    self.cap.write(t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_RX, data=bytes(dat.payload))
+                    self.cap.write(t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_RX,
+                                   data=bytes(dat.payload))
                     lat = float(self.t_ms - dat.sent_ms)
                     sdu: Optional[bytes] = dat.payload
                     if sar_active:
@@ -341,8 +348,10 @@ class Runner:
                     dur = max(1, self.t_ms - window_start_ms)
                     g_l = (bytes_rx_l * 8) / dur * 1000.0
                     g_r = (bytes_rx_r * 8) / dur * 1000.0
-                    self.metrics.write_metric(t_ms=self.t_ms, side="L", layer=LAYER_BYTELINK, event=EVENT_TICK, goodput_bps=g_l)
-                    self.metrics.write_metric(t_ms=self.t_ms, side="R", layer=LAYER_BYTELINK, event=EVENT_TICK, goodput_bps=g_r)
+                    self.metrics.write_metric(t_ms=self.t_ms, side="L", layer=LAYER_BYTELINK, event=EVENT_TICK,
+                                              goodput_bps=g_l)
+                    self.metrics.write_metric(t_ms=self.t_ms, side="R", layer=LAYER_BYTELINK, event=EVENT_TICK,
+                                              goodput_bps=g_r)
                     bytes_rx_l = 0
                     bytes_rx_r = 0
                     window_start_ms = self.t_ms
