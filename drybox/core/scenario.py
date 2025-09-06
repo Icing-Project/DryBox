@@ -39,6 +39,7 @@ class ScenarioResolved:
     cfo_hz: int
     ppm: int
     frame_ms: int = 20  # cadence audio par défaut (v1)
+    crypto: Dict[str, Any] = field(default_factory=dict)
 
     # ---------- Loading & validation ----------
 
@@ -88,6 +89,8 @@ class ScenarioResolved:
         btype = str(bearer_doc.get("type"))
         bparams = {k: v for k, v in bearer_doc.items() if k != "type"}
 
+        crypto = dict(doc.get("crypto") or {})
+
         return cls(
             mode=str(doc["mode"]),
             duration_ms=int(doc["duration_ms"]),
@@ -98,6 +101,7 @@ class ScenarioResolved:
             cfo_hz=int(doc.get("cfo_hz", 0)),
             ppm=int(doc.get("ppm", 0)),
             frame_ms=int(doc.get("frame_ms", 20)),
+            crypto=crypto,
         )
 
     # ---------- Sweep expansion ----------
@@ -140,6 +144,7 @@ class ScenarioResolved:
             "cfo_hz": self.cfo_hz,
             "ppm": self.ppm,
             "frame_ms": self.frame_ms,
+            # "crypto": self.crypto # you might want to display them
         }
 
     def write_resolved_yaml(self, out_path: Union[str, pathlib.Path]) -> None:

@@ -39,8 +39,8 @@ EVENT_TICK = "tick"
 
 # --- Dépendances locales ---
 from drybox.core.metrics import MetricsWriter  # A1
-from drybox.core.capture import DbxCapWriter   # A1
-from drybox.core.scenario import (             # A2
+from drybox.core.capture import DbxCapWriter  # A1
+from drybox.core.scenario import (  # A2
     ScenarioResolved,
 )
 
@@ -50,6 +50,8 @@ from drybox.net.bearers import (
     BearerStatsSnapshot,
 )
 from drybox.net.sar_lite import SARFragmenter, SARReassembler
+
+from drybox.core.crypto_keys import resolve_keypairs, key_id
 
 
 # --------- Utils: chargement adaptateurs ----------
@@ -86,6 +88,7 @@ class AdapterCtx:
     - rng: générateur déterministe côté runner
     - config: dict léger (tick_ms, mode, sdu_max_bytes, seed, side)
     """
+
     def __init__(self, *, side: str, rng: random.Random, get_time_ms, emit_event, config: Dict[str, Any]):
         self.side = side
         self.rng = rng
@@ -103,15 +106,15 @@ class AdapterCtx:
 # --------- Runner ----------
 class Runner:
     def __init__(
-        self,
-        *,
-        scenario: ScenarioResolved,
-        left_adapter_spec: str,
-        right_adapter_spec: str,
-        out_dir: pathlib.Path,
-        tick_ms: int = DEFAULT_TICK_MS,
-        seed: int = DEFAULT_SEED,
-        ui_enabled: bool = True,
+            self,
+            *,
+            scenario: ScenarioResolved,
+            left_adapter_spec: str,
+            right_adapter_spec: str,
+            out_dir: pathlib.Path,
+            tick_ms: int = DEFAULT_TICK_MS,
+            seed: int = DEFAULT_SEED,
+            ui_enabled: bool = True,
     ):
         self.scenario = scenario
         self.left_adapter_spec = left_adapter_spec
@@ -133,7 +136,7 @@ class Runner:
         self.t_ms: int = 0
 
     # --------- Chargement / lifecycle ----------
-    def _load_adapter(self, spec: str, side: str):
+    def _load_adapter(self, spec: str, side: str, crypto_cfg: Dict[str, Any]):
         cls = _load_class_from_path(spec)
         inst = cls()
 
@@ -152,6 +155,8 @@ class Runner:
             "seed": self.seed,
             "mode": self.scenario.mode,
             "sdu_max_bytes": DEFAULT_SDU_MAX,  # hint v1; override via capabilities côté adapter si utile
+            "out_dir": str(self.out_dir),
+            "crypto": crypto_cfg,
         }
         if hasattr(inst, "init"):
             inst.init(cfg)  # type: ignore[attr-defined]
@@ -179,11 +184,57 @@ class Runner:
         if not ok:
             raise SystemExit(3)
 
+    def _dump_pubkeys(self, *, l_pub: bytes, r_pub: bytes, l_prov: str, r_prov: str) -> None:
+        """Écrit runs/.../pubkeys.txt (publiques seules) pour faciliter le debug interop."""
+        txt = [
+            "# DryBox public keys (Ed25519) — DO NOT SHARE PRIVATE KEYS",
+            f"L.key_id={key_id(l_pub)}",
+            f"L.pub_hex={l_pub.hex()}",
+            f"L.provenance={l_prov}",
+            f"R.key_id={key_id(r_pub)}",
+            f"R.pub_hex={r_pub.hex()}",
+            f"R.provenance={r_prov}",
+            f"left_adapter={self.left_adapter_spec}",
+            f"right_adapter={self.right_adapter_spec}",
+            "",
+        ]
+        (self.out_dir / "pubkeys.txt").write_text("\n".join(txt), encoding="utf-8")
+
     # --------- Exécution ----------
     def run(self) -> int:
-        # 0) Charge adaptateurs
-        left, left_caps = self._load_adapter(self.left_adapter_spec, "L")
-        right, right_caps = self._load_adapter(self.right_adapter_spec, "R")
+
+        # --- Résolution des paires de clés ---
+        (l_priv, l_pub, l_prov), (r_priv, r_pub, r_prov) = resolve_keypairs(
+            scenario_crypto=self.scenario.crypto,
+            seed=self.scenario.seed,
+            left_spec=self.left_adapter_spec,
+            right_spec=self.right_adapter_spec,
+        )
+        # Dump *publics* uniquement
+        self._dump_pubkeys(l_pub=l_pub, r_pub=r_pub, l_prov=l_prov, r_prov=r_prov)
+
+        l_crypto = {
+            "type": "ed25519",
+            "priv": l_priv,
+            "pub": l_pub,
+            "peer_pub": r_pub,
+            "provenance": l_prov,
+            "key_id": key_id(l_pub),
+            "peer_key_id": key_id(r_pub),
+        }
+        r_crypto = {
+            "type": "ed25519",
+            "priv": r_priv,
+            "pub": r_pub,
+            "peer_pub": l_pub,
+            "provenance": r_prov,
+            "key_id": key_id(r_pub),
+            "peer_key_id": key_id(l_pub),
+        }
+
+        # --- Charge adaptateurs avec crypto cfg ---
+        left, left_caps = self._load_adapter(self.left_adapter_spec, "L", l_crypto)
+        right, right_caps = self._load_adapter(self.right_adapter_spec, "R", r_crypto)
         self._require_mode_supported(left_caps, right_caps)
 
         # 1) Configure bearer (toujours présent — même en mode audio pour MTU/tempo)
@@ -237,9 +288,11 @@ class Runner:
                                 payloads = frag_l2r.fragment(sdu)
                             for p in payloads:
                                 bearer_l2r.send(p, now_ms=self.t_ms)
-                                self.cap.write(t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_TX, data=bytes(p))
+                                self.cap.write(t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_TX,
+                                               data=bytes(p))
                                 self.metrics.write_metric(
-                                    t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_TX, rtt_ms_est=float(rtt_est)
+                                    t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_TX,
+                                    rtt_ms_est=float(rtt_est)
                                 )
 
                     # RIGHT -> BEARER
@@ -257,14 +310,17 @@ class Runner:
                                 payloads = frag_r2l.fragment(sdu)
                             for p in payloads:
                                 bearer_r2l.send(p, now_ms=self.t_ms)
-                                self.cap.write(t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_TX, data=bytes(p))
+                                self.cap.write(t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_TX,
+                                               data=bytes(p))
                                 self.metrics.write_metric(
-                                    t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_TX, rtt_ms_est=float(rtt_est)
+                                    t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_TX,
+                                    rtt_ms_est=float(rtt_est)
                                 )
 
                 # (3) Livraison via bearer L->R
                 for dat in bearer_l2r.poll_deliver(self.t_ms):
-                    self.cap.write(t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_RX, data=bytes(dat.payload))
+                    self.cap.write(t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_RX,
+                                   data=bytes(dat.payload))
                     lat = float(self.t_ms - dat.sent_ms)
                     sdu: Optional[bytes] = dat.payload
                     if sar_active:
@@ -286,7 +342,8 @@ class Runner:
 
                 # (4) Livraison via bearer R->L
                 for dat in bearer_r2l.poll_deliver(self.t_ms):
-                    self.cap.write(t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_RX, data=bytes(dat.payload))
+                    self.cap.write(t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_RX,
+                                   data=bytes(dat.payload))
                     lat = float(self.t_ms - dat.sent_ms)
                     sdu: Optional[bytes] = dat.payload
                     if sar_active:
@@ -311,8 +368,10 @@ class Runner:
                     dur = max(1, self.t_ms - window_start_ms)
                     g_l = (bytes_rx_l * 8) / dur * 1000.0
                     g_r = (bytes_rx_r * 8) / dur * 1000.0
-                    self.metrics.write_metric(t_ms=self.t_ms, side="L", layer=LAYER_BYTELINK, event=EVENT_TICK, goodput_bps=g_l)
-                    self.metrics.write_metric(t_ms=self.t_ms, side="R", layer=LAYER_BYTELINK, event=EVENT_TICK, goodput_bps=g_r)
+                    self.metrics.write_metric(t_ms=self.t_ms, side="L", layer=LAYER_BYTELINK, event=EVENT_TICK,
+                                              goodput_bps=g_l)
+                    self.metrics.write_metric(t_ms=self.t_ms, side="R", layer=LAYER_BYTELINK, event=EVENT_TICK,
+                                              goodput_bps=g_r)
                     bytes_rx_l = 0
                     bytes_rx_r = 0
                     window_start_ms = self.t_ms

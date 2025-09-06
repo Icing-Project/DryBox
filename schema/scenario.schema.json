@@ -107,6 +107,29 @@
       "additionalProperties": true
     },
 
+    "crypto": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "left_priv": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object", "properties": { "hex": { "type": "string" } }, "required": ["hex"] },
+            { "type": "object", "properties": { "b64": { "type": "string" } }, "required": ["b64"] },
+            { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] }
+          ]
+        },
+        "right_priv": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object", "properties": { "hex": { "type": "string" } }, "required": ["hex"] },
+            { "type": "object", "properties": { "b64": { "type": "string" } }, "required": ["b64"] },
+            { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] }
+          ]
+        }
+      }
+    },
+
     "cfo_hz": { "type": "integer", "default": 0 },
     "ppm": { "type": "integer", "default": 0 }
   }

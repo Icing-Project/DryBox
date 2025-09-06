@@ -14,4 +14,8 @@ bearer:
   ge_p_bad_good: 0.1
   mtu_bytes: 96   # force SAR-lite (SDU > 96 B will be fragmented)
 
+crypto:
+  left_priv: A1821FF0FC6A3D35BB43F1D1F75D850E6E492CD3BA0424E5FD7D2BDA1DFB96B9
+  right_priv: F080806F3939B4595DE51838E85F4BD98BCD1532C0BFF50BE157E934F408E700
+
 # Mode A: no channel/vocoder required
