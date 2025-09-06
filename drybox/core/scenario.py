@@ -1,27 +1,31 @@
+# drybox/core/scenario.py
 # MIT License
-# drybox/core/scenario.py — validateur & résolveur centralisé des scénarios YAML
 from __future__ import annotations
 
-import json
+from dataclasses import dataclass, field, replace
+from typing import Any, Dict, List, Tuple, Optional, Union
 import pathlib
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
     import yaml  # PyYAML
 except ImportError as e:
-    raise SystemExit("PyYAML is required. Install with `uv add pyyaml`") from e
-
-try:
-    import jsonschema
-except ImportError as e:
-    raise SystemExit("jsonschema is required. Install with `uv add jsonschema`") from e
+    raise SystemExit("PyYAML is required. Install with `uv add pyyaml`.") from e
 
 
+# ---- Defaults (utilisés par runner/tests) ------------------------------------
+DEFAULT_TICK_MS = 10
+DEFAULT_SEED = 0
+DEFAULT_MODE = "audio"
+DEFAULT_FRAME_MS = 20
+
+
+# ---- Exceptions --------------------------------------------------------------
 class ScenarioValidationError(Exception):
-    """Raised when the scenario YAML fails schema validation."""
+    """Erreur de validation du scénario (YAML invalide, type hors domaine, etc.)."""
+    pass
 
 
+# ---- Modèles -----------------------------------------------------------------
 @dataclass
 class BearerConfig:
     type: str
@@ -30,125 +34,152 @@ class BearerConfig:
 
 @dataclass
 class ScenarioResolved:
-    mode: str
-    duration_ms: int
-    seed: int
-    bearer: BearerConfig
-    channel: Dict[str, Any]
-    vocoder: Dict[str, Any]
-    cfo_hz: int
-    ppm: int
-    frame_ms: int = 20  # cadence audio par défaut (v1)
+    # Champs communs
+    mode: str = DEFAULT_MODE                 # "audio" | "byte"
+    duration_ms: int = 60_000
+    seed: int = DEFAULT_SEED
+    frame_ms: int = DEFAULT_FRAME_MS
+
+    # Réseau / Radio
+    bearer: BearerConfig = field(default_factory=lambda: BearerConfig(type="telco_volte_evs"))
+    channel: Dict[str, Any] = field(default_factory=dict)   # Mode B (mais utilisé pour sweep snr_db)
+    vocoder: Dict[str, Any] = field(default_factory=dict)   # Mode B
+
+    # Divers
+    cfo_hz: int = 0
+    ppm: int = 0
+
+    # Crypto (ne jamais écrire dans le YAML résolu)
     crypto: Dict[str, Any] = field(default_factory=dict)
 
-    # ---------- Loading & validation ----------
-
-    @staticmethod
-    def _schema_path() -> pathlib.Path:
-        # repo_root/schema/scenario.schema.json
-        return pathlib.Path(__file__).resolve().parents[2] / "schema" / "scenario.schema.json"
-
-    @staticmethod
-    def _load_schema() -> Dict[str, Any]:
-        with open(ScenarioResolved._schema_path(), "r", encoding="utf-8") as fp:
-            return json.load(fp)
-
-    @staticmethod
-    def _apply_defaults(doc: Dict[str, Any]) -> Dict[str, Any]:
-        # Top-level defaults
-        out = dict(doc) if doc else {}
-        out.setdefault("mode", "audio")
-        out.setdefault("duration_ms", 60000)
-        out.setdefault("seed", 0)
-        out.setdefault("frame_ms", 20)
-        out.setdefault("cfo_hz", 0)
-        out.setdefault("ppm", 0)
-        out.setdefault("bearer", {"type": "telco_volte_evs"})
-        out.setdefault("channel", {})
-        out.setdefault("vocoder", {})
-        return out
-
+    # ---- Builders ------------------------------------------------------------
     @classmethod
     def from_yaml(cls, path: Union[str, pathlib.Path]) -> "ScenarioResolved":
+        """Charge et valide depuis un fichier YAML."""
         p = pathlib.Path(path)
-        with open(p, "r", encoding="utf-8") as fp:
-            raw = yaml.safe_load(fp) or {}
-        if not isinstance(raw, dict):
-            raise ScenarioValidationError("Scenario YAML must define a mapping at top level")
-
-        # Defaults then validate
-        doc = cls._apply_defaults(raw)
-        schema = cls._load_schema()
         try:
-            jsonschema.validate(instance=doc, schema=schema)
-        except jsonschema.ValidationError as e:
+            with open(p, "r", encoding="utf-8") as fp:
+                raw = yaml.safe_load(fp) or {}
+        except Exception as e:
+            raise ScenarioValidationError(f"Cannot read scenario YAML: {e}") from e
+        return cls.from_yaml_dict(raw, source_path=str(p))
+
+    @classmethod
+    def from_yaml_dict(cls, doc: Dict[str, Any], *, source_path: Optional[str] = None) -> "ScenarioResolved":
+        """Construit et valide depuis un dict Python (utilisé par les tests)."""
+        try:
+            mode = str(doc.get("mode", DEFAULT_MODE))
+            if mode not in ("audio", "byte"):
+                raise ScenarioValidationError("mode must be 'audio' or 'byte'")
+
+            duration_ms = cls._as_int(doc.get("duration_ms", 60_000), "duration_ms")
+            seed = cls._as_int(doc.get("seed", DEFAULT_SEED), "seed")
+            frame_ms = cls._as_int(doc.get("frame_ms", DEFAULT_FRAME_MS), "frame_ms")
+
+            # bearer
+            bearer_doc = doc.get("bearer") or {"type": "telco_volte_evs"}
+            if not isinstance(bearer_doc, dict) or "type" not in bearer_doc:
+                raise ScenarioValidationError("bearer.type is required")
+            btype = str(bearer_doc["type"])
+            bparams = {k: v for k, v in bearer_doc.items() if k != "type"}
+            if "latency_ms" in bparams:
+                cls._as_int(bparams["latency_ms"], "latency_ms")
+            if "mtu_bytes" in bparams:
+                cls._as_int(bparams["mtu_bytes"], "mtu_bytes")
+
+            # channel
+            channel = dict(doc.get("channel") or {})
+            if "snr_db" in channel:
+                channel["snr_db"] = cls._as_number_or_number_list(channel["snr_db"], "snr_db")
+
+            # vocoder
+            vocoder = dict(doc.get("vocoder") or {})
+
+            cfo_hz = int(doc.get("cfo_hz", 0))
+            ppm = int(doc.get("ppm", 0))
+
+            # crypto (clé privée fournie optionnellement) — on ne valide pas ici le format exact,
+            # la résolution des clés se fait dans core/crypto_keys.py
+            crypto = dict(doc.get("crypto") or {})
+
+            return cls(
+                mode=mode,
+                duration_ms=duration_ms,
+                seed=seed,
+                frame_ms=frame_ms,
+                bearer=BearerConfig(type=btype, params=bparams),
+                channel=channel,
+                vocoder=vocoder,
+                cfo_hz=cfo_hz,
+                ppm=ppm,
+                crypto=crypto,
+            )
+        except ScenarioValidationError:
+            raise
+        except Exception as e:
+            # On encapsule toute autre erreur en validation error
             raise ScenarioValidationError(str(e)) from e
 
-        # Normalize BearerConfig
-        bearer_doc = doc["bearer"]
-        btype = str(bearer_doc.get("type"))
-        bparams = {k: v for k, v in bearer_doc.items() if k != "type"}
-
-        crypto = dict(doc.get("crypto") or {})
-
-        return cls(
-            mode=str(doc["mode"]),
-            duration_ms=int(doc["duration_ms"]),
-            seed=int(doc["seed"]),
-            bearer=BearerConfig(type=btype, params=bparams),
-            channel=dict(doc.get("channel") or {}),
-            vocoder=dict(doc.get("vocoder") or {}),
-            cfo_hz=int(doc.get("cfo_hz", 0)),
-            ppm=int(doc.get("ppm", 0)),
-            frame_ms=int(doc.get("frame_ms", 20)),
-            crypto=crypto,
-        )
-
-    # ---------- Sweep expansion ----------
-
+    # ---- Instance API attendue par les tests ---------------------------------
     def expand_sweep(self) -> List[Tuple[str, "ScenarioResolved"]]:
         """
-        If channel.snr_db is a list -> clone for each value.
-        Returns list of (suffix, ScenarioResolved).
+        Duplique le scénario pour chaque valeur listée des champs acceptant des sweeps.
+        v1: `channel.snr_db` peut être un nombre ou une liste de nombres.
         """
+        clones: List[Tuple[str, ScenarioResolved]] = []
         snr = self.channel.get("snr_db")
         if isinstance(snr, list) and snr:
-            clones: List[Tuple[str, ScenarioResolved]] = []
             for v in snr:
-                clone = ScenarioResolved(
-                    mode=self.mode,
-                    duration_ms=self.duration_ms,
-                    seed=self.seed,
-                    bearer=BearerConfig(type=self.bearer.type, params=dict(self.bearer.params)),
-                    channel={**self.channel, "snr_db": v},
-                    vocoder=dict(self.vocoder),
-                    cfo_hz=self.cfo_hz,
-                    ppm=self.ppm,
-                    frame_ms=self.frame_ms,
-                )
+                clone = replace(self)
+                clone.channel = {**self.channel, "snr_db": v}
                 suffix = f"snr_{int(v) if isinstance(v, (int, float)) and v == int(v) else v}"
                 clones.append((suffix, clone))
             return clones
+        # Pas de sweep → un seul clone vide
         return [("", self)]
 
-    # ---------- Serialization ----------
+    def write_resolved_yaml(self, path: Union[str, pathlib.Path]) -> None:
+        """
+        Écrit un fichier YAML "résolu" **sans** secrets (crypto absent).
+        Utilisé par les tests pour vérifier l’écriture.
+        """
+        out = pathlib.Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as fp:
+            yaml.safe_dump(self.to_public_dict(), fp, sort_keys=False)
 
-    def to_resolved_dict(self) -> Dict[str, Any]:
+    # ---- Utilitaires ---------------------------------------------------------
+    def to_public_dict(self) -> Dict[str, Any]:
+        """Représentation sérialisable sans secrets (crypto exclu)."""
         return {
             "mode": self.mode,
             "duration_ms": self.duration_ms,
             "seed": self.seed,
+            "frame_ms": self.frame_ms,
             "bearer": {"type": self.bearer.type, **self.bearer.params},
-            "channel": dict(self.channel),
-            "vocoder": dict(self.vocoder),
+            "channel": self.channel,
+            "vocoder": self.vocoder,
             "cfo_hz": self.cfo_hz,
             "ppm": self.ppm,
-            "frame_ms": self.frame_ms,
-            # "crypto": self.crypto # you might want to display them
+            # crypto volontairement omis
         }
 
-    def write_resolved_yaml(self, out_path: Union[str, pathlib.Path]) -> None:
-        p = pathlib.Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "w", encoding="utf-8") as fp:
-            yaml.safe_dump(self.to_resolved_dict(), fp, sort_keys=False)
+    @staticmethod
+    def _as_int(v: Any, name: str) -> int:
+        if isinstance(v, bool) or not isinstance(v, (int,)):
+            raise ScenarioValidationError(f"{name} must be integer")
+        return int(v)
+
+    @staticmethod
+    def _as_number_or_number_list(v: Any, name: str) -> Any:
+        if isinstance(v, (int, float)):
+            return v
+        if isinstance(v, list) and all(isinstance(x, (int, float)) for x in v):
+            return v
+        raise ScenarioValidationError(f"{name} must be a number or a list[number]")
+
+
+# ---- Compat (runner pouvait importer une fonction) ---------------------------
+def expand_sweep(scen: ScenarioResolved) -> List[Tuple[str, ScenarioResolved]]:
+    """Reste compatible avec le runner existant qui importait expand_sweep() en fonction."""
+    return scen.expand_sweep()
