@@ -20,15 +20,21 @@
 
 ### 1.2 Loading & lifecycle (Python module v1)
 
-* Loaded by path `path/to/adapter.py:ClassName`.
-* **Lifecycle**: `__init__(cfg)` → `start(ctx)` → (per-tick callbacks) → `stop()`.
-* `cfg`: opaque dict provided by DryBox (e.g., `{"side": "left"}`).
-* `ctx`: **execution context** (stable in v1):
+* Load adapters by path `path/to/adapter.py:ClassName`.
+* **Lifecycle**: `__init__()` → `init(cfg)` (optional) → `start(ctx)` → (per‑tick callbacks) → `stop()` (optional).
+* `cfg` is an opaque dict. In v1 DryBox includes at least:
+  - `side`: `"L"` or `"R"`
+  - `tick_ms`, `seed`, `mode`, `sdu_max_bytes`, `out_dir`
+  - `crypto`: see §2.3 (if available; contains `{priv, pub, peer_pub, key_id, peer_key_id}`)
 
-  * `ctx["side"]`: `"left"` | `"right"`.
-  * `ctx["metrics"]`: **sink** exposing `metric(**row)` and `event(**entry)` so the adapter can log measurements/events (optional but recommended).
-  * Other keys may appear (forward-compatible).
-    *(Runner v1 provides `side` & `metrics`.)*
+* `ctx` is a stable execution context with:
+  - `now_ms()` → current **logical** time
+  - `emit_event(type: str, payload: dict)` → writes to `events.jsonl`
+  - `rng` (deterministic, seeded by DryBox)
+  - `config` (the same `cfg` dict passed to `init()`)
+
+Adapters must be **non‑blocking**. All callbacks are invoked on the runner thread (no concurrent re‑entry).
+
 
 ### 1.3 Threading
 
@@ -59,11 +65,34 @@ def nade_capabilities() -> dict:
 
 * In v1, DryBox **negotiates minimally**: if a mode isn’t supported, it **fails the run** (exit 3). If `audioparams` diverge, DryBox v1 prefers its scenario/default parameters (renegotiation extension to come).
 
+### 2.3 Cryptographic provisioning (Ed25519, v1)
+
+DryBox can provide per‑side Ed25519 key material to adapters via `cfg["crypto"]`. For each side (L/R):
+
+- `priv`: 32‑byte private seed (Ed25519)
+- `pub`: 32‑byte public key
+- `peer_pub`: 32‑byte peer public key
+- `key_id`: hex short ID for `pub` (first 8 hex chars of SHA‑256(pub))
+- `peer_key_id`: short ID for `peer_pub`
+
+**Where keys come from**
+
+1. **Scenario‑provided** (optional): under `crypto.left_priv` and/or `crypto.right_priv`, accepted forms:
+   - `{hex: "<64 hex chars>"}` or `{b64: "<base64>"}` or `{path: "file"}`.
+   - 32‑byte seeds preferred; 64‑byte extended keys are accepted and truncated to 32.
+   - Invalid inputs cause **exit 4** (invalid scenario).
+
+2. **Otherwise derived** deterministically via HKDF‑SHA256 from `(seed, left_adapter_spec, right_adapter_spec, side)` so sweeps (e.g., `snr_db=[...]`) **do not change keys**.
+
+DryBox **never** writes private keys to disk. It emits `runs/.../pubkeys.txt` with public keys and IDs only, for interop debugging.
+
+> This provisioning is **ABI‑agnostic**: adapters may ignore `cfg["crypto"]` if they don’t need authentication. (Reference mock: the PingPong adapter uses domain‑separated Ed25519 signatures in its handshake.)
+
 ---
 
 ## 3) Mode A — ByteLink (opaque datagrams)
 
-### 3.1 API contract
+### 3.1 API contract (Mode A — ByteLink)
 
 ```python
 class NadeByteLink:
@@ -142,23 +171,15 @@ class NadeAudioPort:
 
 ### 6.1 Files emitted by DryBox
 
-* `metrics.csv`: fixed columns `[t_ms, side, layer, event, rtt_ms_est, latency_ms, jitter_ms, loss_rate, reorder_rate, goodput_bps, snr_db_est, ber, per, cfo_hz_est, lock_ratio, hs_time_ms, rekey_ms, aead_fail_cnt]`.
-* `events.jsonl`: `{t_ms, side, type, payload}` (free schema).
-* `.dbxcap`: timestamped TLV multi-layer: **pre-SAR**, **post-SAR**, **post-bearer**; **PCAP-NG** export available post-SAR.
+* `metrics.csv` (fixed columns):  
+  `[t_ms, side, layer, event, rtt_ms_est, latency_ms, jitter_ms, loss_rate, reorder_rate, goodput_bps, snr_db_est, ber, per, cfo_hz_est, lock_ratio, hs_time_ms, rekey_ms, aead_fail_cnt]`
+* `events.jsonl`: lines of `{"t_ms", "side", "type", "payload"}`
+* `capture.dbxcap`: replayable TLV file. Header: `b"DBXC"` (4) + `version=1` (u8); per‑record:  
+  `t_ms:u64le | side:u8 (0=L→R,1=R→L) | layer:u8 (0=bytelink,1=bearer) | event:u8 (0=tx,1=rx,2=drop) | len:u32le | data:bytes`
 
-### 6.2 Adapter-side injection (optional but recommended)
+### 6.2 Emitting observability from adapters
 
-* Via `ctx["metrics"]`:
-
-  * `metrics.metric(**row)` to feed the columns (leave `None` if not applicable).
-  * `metrics.event(type="handshake_done", payload={"time_ms": 730, ...}, t_ms=...)` (the runner writes `events.jsonl`).
-* **Suggested event conventions**:
-
-  * `handshake_start|done|fail` (payload: `pattern=XK|XX`, `hs_time_ms`, `err`),
-  * `rekey_done` (`rekey_ms`), `aead_fail` (counter),
-  * `modem_lock|unlock` (`lock_ratio`).
-    *(These keys correspond to columns “hs\_time\_ms”, “rekey\_ms”, “aead\_fail\_cnt”. DryBox doesn’t impose the schema, but will **evaluate** acceptance criteria from these signals.)*
-
+Adapters **do not** write metrics directly. Use `ctx.emit_event(type, payload)` to write events. DryBox produces metrics rows at layer boundaries (bearer tx/rx, ByteLink rx, periodic goodput window).
 ---
 
 ## 7) States & scheduling (text)
@@ -308,3 +329,14 @@ class Adapter:
 * **Discovery**: `nade_capabilities()` with `"abi_version": "1.0"`.
 * **Non-blocking, single thread, logical `t_ms`**, arrival order not guaranteed in Mode A.
 * **Metrics/events** via `ctx["metrics"]` (optional).
+
+
+### Appendix — Reference mock: PingPong Ed25519 handshake
+
+If `cfg["crypto"]` is present, the PingPong adapter authenticates peers:
+
+- `SYN`: `L_nonce(8) || sig_L("PPv1|SYN|" + L_nonce)`
+- `SYNACK`: `R_nonce(8) || sig_R("PPv1|SYNACK|" + L_nonce + R_nonce)`
+- `ACK`: `sig_L2("PPv1|ACK|" + L_nonce + R_nonce)`
+
+On success, both sides emit `hs_done` with `{"auth":"ok"}`; otherwise `hs_fail`. A `crypto_info` event logs non‑sensitive key info (pubs, IDs).

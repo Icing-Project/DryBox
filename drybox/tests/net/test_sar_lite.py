@@ -47,22 +47,32 @@ def test_sar_identity_reassemble_any_permutation(sdu: bytes, mtu: int, seed: int
     assert out == sdu
 
 
+@st.composite
+def _multi_fragment_cases(draw):
+    # Garantit ≥ 2 fragments: on choisit sdu_len > (mtu - HEADER_LEN)
+    mtu = draw(st.integers(min_value=HEADER_LEN + 4, max_value=128))
+    cap = mtu - HEADER_LEN
+    # Borne supérieure raisonnable pour rester rapide
+    max_len = min(2048, cap * 8 if cap * 8 >= cap + 1 else cap + 1)
+    sdu_len = draw(st.integers(min_value=cap + 1, max_value=max_len))
+    sdu = draw(st.binary(min_size=sdu_len, max_size=sdu_len))
+    seed = draw(st.integers(min_value=0, max_value=2**32 - 1))
+    return sdu, mtu, seed
+
 @settings(max_examples=120, deadline=None)
-@given(
-    sdu=st.binary(min_size=1, max_size=2048),
-    mtu=st.integers(min_value=HEADER_LEN + 4, max_value=128),
-    seed=st.integers(min_value=0, max_value=2**32 - 1),
-)
-def test_sar_partial_loss_timeout_then_clean_abort(sdu: bytes, mtu: int, seed: int) -> None:
+@given(case=_multi_fragment_cases())
+def test_sar_partial_loss_timeout_then_clean_abort(case) -> None:
     """
     Propriété: perte d'au moins un fragment => aucun SDU ne doit sortir.
-    Puis, après expiration du timeout (~2×RTT_est côté runner, cf. spec), le groupe est purgé
-    et l'arrivée tardive d'un fragment manquant ne reconstitue pas l'ancien SDU.
+    Puis, après expiration du timeout (~2×RTT_est), le groupe est purgé
+    et un fragment tardif isolé ne réassemble pas l'ancien SDU.
     """
+    sdu, mtu, seed = case
+
     frag = SARFragmenter(mtu_bytes=mtu)
     frags = frag.fragment(sdu)
-    # On veut au moins 2 fragments pour simuler une perte partielle
-    assume(len(frags) >= 2)
+    # Invariant du générateur: on a bien ≥ 2 fragments
+    assert len(frags) >= 2
 
     order = _shuffle_deterministic(frags, seed)
     drop_idx = random.Random(seed ^ 0xA5A5).randrange(len(order))
@@ -80,6 +90,7 @@ def test_sar_partial_loss_timeout_then_clean_abort(sdu: bytes, mtu: int, seed: i
 
     # L'arrivée tardive d'un fragment seul ne doit pas réassembler l'ancien SDU
     assert reas.push_fragment(missing, now_ms=10_100) is None
+
 
 
 def test_sar_single_fragment_path() -> None:

@@ -75,8 +75,8 @@
 
 ```python
 class NadeByteLink:
-    def on_link_rx(self, sdu: bytes, t_ms: int) -> None: ...
-    def poll_link_tx(self, budget: int) -> list[tuple[bytes, int]]: ...
+    def on_link_rx(self, sdu: bytes) -> None: ...
+    def poll_link_tx(self, budget: int) -> list[bytes]: ...
     def on_timer(self, t_ms: int) -> None: ...
 ```
 
@@ -138,6 +138,20 @@ def nade_capabilities() -> dict:
 - **SAR‑lite** (Mode A, optional): 3‑byte header `frag_id | idx | last`.
 - **Metrics**: each layer boundary emits a timestamped event → CSV/JSON + visualization.
 
+### 5.1 Cryptographic key provisioning (Ed25519)
+
+DryBox **provisions per‑run, per‑side keys** to adapters:
+
+1) **Scenario‑provided** (optional):  
+`crypto.left_priv` and/or `crypto.right_priv` accept `{hex}`, `{b64}`, or `{path}`. 32‑byte seeds preferred; 64‑byte accepted (truncated). Invalid input → **exit 4**.
+
+2) **Otherwise derived** (deterministic):  
+HKDF‑SHA256 from `(seed, left_adapter_spec, right_adapter_spec, side)` so that **sweep parameters do not affect key material**.
+
+Provisioning to adapters: `cfg["crypto"] = {priv, pub, peer_pub, key_id, peer_key_id}`.
+
+Artifacts: DryBox writes **`pubkeys.txt`** (public keys **only**, with `key_id`) in the run directory; **no private keys** are persisted.
+
 ---
 
 ## 6) Scenarios (YAML)
@@ -186,6 +200,14 @@ channel: {type: awgn, snr_db: [0, 5, 10, 15, 20]}
 vocoder: {type: amr12k2_mock, vad_dtx: true}
 ```
 
+**Scenario resolver (centralized)**
+
+The runner uses a unified resolver (`ScenarioResolved`) that:
+- parses & validates YAML (`from_yaml`/`from_yaml_dict`),
+- applies defaults,
+- expands sweeps (e.g., `channel.snr_db: [0, 9, 12]`),
+- **always** writes `scenario.resolved.yaml` in each run directory, with **crypto removed**.
+
 ---
 
 ## 7) Metrics & outputs
@@ -194,6 +216,13 @@ vocoder: {type: amr12k2_mock, vad_dtx: true}
 - **Audio/Radio (Mode B)**: estimated SNR, CFO/clock jitter, modem lock ratio, **BER/PER**, resync rate, jitter‑buffer underruns.
 - **Protocol**: handshake time, failure rate, rekey duration, post‑AEAD losses.
 - **Exports**: `runs/<date>/<scenario>/metrics.csv`, `events.jsonl`, pcap‑like binaries (pre/post SAR, post bearer), plots (PNG).
+
+**Outputs**
+
+- `metrics.csv` — fixed header; rows written at bearer TX/RX and ByteLink RX, plus 1 s goodput windows.
+- `events.jsonl` — adapter‑emitted events via `ctx.emit_event`.
+- `capture.dbxcap` — replayable TLV (DBXC v1).
+- `pubkeys.txt` — public keys only (Ed25519), with short `key_id`s (no secrets).
 
 ---
 
