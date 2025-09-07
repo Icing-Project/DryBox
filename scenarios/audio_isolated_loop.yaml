@@ -1,0 +1,11 @@
+# P2-01 Isolated audio loop test scenario
+mode: audio
+duration_ms: 5000
+seed: 42
+bearer:
+  type: ott_udp
+  latency_ms: 0  # No latency for isolated loop
+  jitter_ms: 0
+  loss_rate: 0.0
+  reorder_rate: 0.0
+  mtu_bytes: 1500

@@ -1,0 +1,9 @@
+# DryBox public keys (Ed25519) — DO NOT SHARE PRIVATE KEYS
+L.key_id=d9dd80a3
+L.pub_hex=e724f53977f5e92d76fc701bdf025e15bd5963ec5f8968e8223bd68c6e8fa375
+L.provenance=derived
+R.key_id=2da7f25c
+R.pub_hex=e8164aa35e3882f796e60a574614e50a4891f2d585ed1099edf9094a08788e3b
+R.provenance=derived
+left_adapter=adapters/audio_test.py:AudioTestAdapter
+right_adapter=adapters/audio_test.py:AudioTestAdapter
