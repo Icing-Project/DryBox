@@ -1,0 +1,16 @@
+# P2-03 Audio with Rayleigh fading channel test
+mode: audio
+duration_ms: 5000
+seed: 42
+bearer:
+  type: ott_udp
+  latency_ms: 20
+  jitter_ms: 5
+  loss_rate: 0.0
+  reorder_rate: 0.0
+  mtu_bytes: 1500
+channel:
+  type: fading
+  snr_db: 15  # Average SNR
+  fd_hz: 50   # Maximum Doppler frequency (Hz) - typical for walking speed
+  L: 8        # Number of multipath components

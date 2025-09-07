@@ -1,4 +1,4 @@
-# DryBox × Nade — Architecture and Implementation Guide (DBX‑ABI v1)
+  # DryBox × Nade — Architecture and Implementation Guide (DBX‑ABI v1)
 
 > **Version**: 1.0 (beta)\
 > **Audience**: Icing team (protocol, radio/DSP, networking, app), new contributors\

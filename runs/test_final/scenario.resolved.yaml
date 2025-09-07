@@ -1,0 +1,16 @@
+mode: audio
+duration_ms: 5000
+seed: 42
+bearer:
+  type: ott_udp
+  latency_ms: 20
+  jitter_ms: 5
+  loss_rate: 0.0
+  reorder_rate: 0.0
+  mtu_bytes: 1500
+channel:
+  type: awgn
+  snr_db: 10
+vocoder: {}
+cfo_hz: 0
+ppm: 0
