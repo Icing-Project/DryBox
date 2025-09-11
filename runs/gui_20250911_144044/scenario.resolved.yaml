@@ -1,0 +1,10 @@
+mode: audio
+duration_ms: 5000
+seed: 0
+bearer:
+  type: telco_cs_gsm
+  loss_rate: 0.0
+channel: {}
+vocoder: {}
+cfo_hz: 0
+ppm: 0
