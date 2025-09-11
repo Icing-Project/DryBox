@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, '.')
-from drybox.adapters.audioblock import AudioBlockAdapter
+from audioblock import AudioBlockAdapter
 
 
 class AudioRecordingTest(AudioBlockAdapter):

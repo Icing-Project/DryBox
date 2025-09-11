@@ -7,7 +7,7 @@ import struct
 from pathlib import Path
 
 sys.path.insert(0, '.')
-from drybox.adapters.audioblock import AudioBlockAdapter
+from audioblock import AudioBlockAdapter
 
 
 class AudioEnhancedPlayer(AudioBlockAdapter):

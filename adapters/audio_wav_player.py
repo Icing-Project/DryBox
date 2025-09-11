@@ -5,9 +5,9 @@ import sys
 import wave
 from pathlib import Path
 
-sys.path.insert(0, '.')
-from drybox.adapters.audioblock import AudioBlockAdapter
-
+import sys, os
+sys.path.append(os.path.dirname(__file__))
+from audioblock import AudioBlockAdapter
 
 class AudioWavPlayer(AudioBlockAdapter):
     """Simple WAV file player adapter"""
