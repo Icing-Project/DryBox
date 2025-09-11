@@ -1,9 +1,0 @@
-# DryBox public keys (Ed25519) — DO NOT SHARE PRIVATE KEYS
-L.key_id=594b30ba
-L.pub_hex=2fe4ba0cf00cb9620e7563bd23341de8e8fea14e9cd0ea2ea927715357c6fc8d
-L.provenance=derived
-R.key_id=0713e0c4
-R.pub_hex=471d189bb1cf2972da31b276a7a38599e0615a31e692cb8831077652fad4bafc
-R.provenance=derived
-left_adapter=adapters/audio_wav_player.py:AudioWavPlayer
-right_adapter=adapters/audio_wav_player.py:AudioWavPlayer
