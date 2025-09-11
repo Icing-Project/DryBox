@@ -81,7 +81,7 @@
     "channel": {
       "type": "object",
       "properties": {
-        "type": { "type": "string", "enum": ["awgn", "fading"] },
+        "type": { "type": "string", "enum": ["awgn", "rayleigh"] },
         "snr_db": {
           "oneOf": [
             { "type": "number" },

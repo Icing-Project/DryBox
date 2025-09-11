@@ -157,7 +157,7 @@ bearer:
   reorder: 0.01
   mtu: 64                # Mode A
 channel:                  # Mode B
-  type: awgn | fading
+  type: awgn | rayleigh
   snr_db: 12
 vocoder:                  # Mode B (mock)
   type: amr12k2_mock
