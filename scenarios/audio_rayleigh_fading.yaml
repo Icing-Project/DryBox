@@ -10,7 +10,7 @@ bearer:
   reorder_rate: 0.0
   mtu_bytes: 1500
 channel:
-  type: fading
+  type: rayleigh
   snr_db: 15  # Average SNR
   fd_hz: 50   # Maximum Doppler frequency (Hz) - typical for walking speed
   L: 8        # Number of multipath components

@@ -1,1 +1,6 @@
-.claude
+*/__pycache__
+.venv
+uv.lock
+.idea
+.code
+.vscode
