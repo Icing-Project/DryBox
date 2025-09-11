@@ -1,4 +1,4 @@
-# DryBox × Nade — Architecture and Implementation Guide (DBX‑ABI v1)
+  # DryBox × Nade — Architecture and Implementation Guide (DBX‑ABI v1)
 
 > **Version**: 1.0 (beta)\
 > **Audience**: Icing team (protocol, radio/DSP, networking, app), new contributors\
@@ -171,7 +171,7 @@ bearer:
   reorder: 0.01
   mtu: 64                # Mode A
 channel:                  # Mode B
-  type: awgn | fading
+  type: awgn | rayleigh
   snr_db: 12
 vocoder:                  # Mode B (mock)
   type: amr12k2_mock

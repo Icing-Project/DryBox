@@ -1,0 +1,14 @@
+# P2-04 Test PLC with high packet loss
+mode: audio
+duration_ms: 5000
+seed: 42
+bearer:
+  type: ott_udp
+  latency_ms: 60
+  jitter_ms: 10
+  loss_rate: 0.10  # 10% packet loss to test PLC
+  reorder_rate: 0.0
+  mtu_bytes: 1500
+vocoder:
+  type: amr12k2_mock
+  vad_dtx: false  # Disable VAD to focus on PLC

@@ -1,0 +1,17 @@
+# P2-04 Audio with AMR vocoder mock
+mode: audio
+duration_ms: 5000
+seed: 42
+bearer:
+  type: ott_udp
+  latency_ms: 60
+  jitter_ms: 10
+  loss_rate: 0.02  # 2% packet loss for PLC testing
+  reorder_rate: 0.0
+  mtu_bytes: 1500
+channel:
+  type: awgn
+  snr_db: 20
+vocoder:
+  type: amr12k2_mock
+  vad_dtx: true
