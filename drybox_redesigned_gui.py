@@ -143,31 +143,23 @@ class ModernStyle:
         
         /* Modern Buttons */
         QPushButton {{
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 {theme.accent_primary},
-                stop: 1 {theme.gradient_end}
-            );
+            background: {theme.accent_primary};
             color: white;
             border: none;
             border-radius: 8px;
             padding: 12px 24px;
             font-weight: 600;
             font-size: 14px;
-            min-height: 40px;
+            min-height: 44px;
             letter-spacing: 0.3px;
         }}
         
         QPushButton:hover {{
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 {theme.accent_secondary},
-                stop: 1 {theme.accent_primary}
-            );
+            background: {theme.accent_secondary};
         }}
         
         QPushButton:pressed {{
-            background: {theme.gradient_end};
+            background: {theme.bg_hover};
         }}
         
         QPushButton:disabled {{
@@ -177,31 +169,19 @@ class ModernStyle:
         
         /* Primary Action Button */
         QPushButton#primary {{
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 1, y2: 0,
-                stop: 0 {theme.accent_primary},
-                stop: 1 {theme.gradient_end}
-            );
+            background: {theme.accent_primary};
             font-size: 15px;
             min-height: 48px;
             padding: 14px 32px;
         }}
         
         QPushButton#primary:hover {{
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 1, y2: 0,
-                stop: 0 {theme.accent_secondary},
-                stop: 1 {theme.accent_primary}
-            );
+            background: {theme.accent_secondary};
         }}
         
         /* Success Button */
         QPushButton#success {{
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 {theme.success},
-                stop: 1 #059669
-            );
+            background: {theme.success};
         }}
         
         QPushButton#success:hover {{
@@ -214,11 +194,7 @@ class ModernStyle:
         
         /* Danger Button */
         QPushButton#danger {{
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 {theme.danger},
-                stop: 1 #DC2626
-            );
+            background: {theme.danger};
         }}
         
         QPushButton#danger:hover {{
@@ -321,20 +297,8 @@ class ModernStyle:
         QComboBox QAbstractItemView {{
             background: {theme.bg_secondary};
             border: 1px solid {theme.border};
-            border-radius: 8px;
-            padding: 4px;
             selection-background-color: {theme.accent_primary};
-            outline: none;
-        }}
-        
-        QComboBox QAbstractItemView::item {{
-            padding: 8px;
-            min-height: 28px;
-            border-radius: 4px;
-        }}
-        
-        QComboBox QAbstractItemView::item:hover {{
-            background: rgba(99, 102, 241, 0.2);
+            selection-color: white;
         }}
         
         /* Radio Buttons */
@@ -449,11 +413,7 @@ class ModernStyle:
         }}
         
         QProgressBar::chunk {{
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 1, y2: 0,
-                stop: 0 {theme.accent_primary},
-                stop: 1 {theme.gradient_end}
-            );
+            background: {theme.accent_primary};
             border-radius: 12px;
         }}
         
@@ -761,7 +721,9 @@ class AdapterConfigWidget(QGroupBox):
         type_layout.addWidget(type_label)
         
         self.type_combo = QComboBox()
-        self.type_combo.addItems(sorted(self.adapter_specs.keys()))
+        self.type_combo.setMinimumHeight(36)
+        adapter_types = sorted(self.adapter_specs.keys())
+        self.type_combo.addItems(adapter_types)
         self.type_combo.currentTextChanged.connect(self.update_config)
         type_layout.addWidget(self.type_combo, 1)
         
@@ -839,6 +801,7 @@ class AdapterConfigWidget(QGroupBox):
             
         elif adapter_type == "audio_recording_test":
             signal_combo = QComboBox()
+            signal_combo.setMinimumHeight(36)
             signal_combo.addItems(["sine", "chirp", "noise", "silence"])
             self.config_layout.addRow("Signal:", signal_combo)
             self.config_widgets['signal_type'] = signal_combo
@@ -1124,10 +1087,8 @@ class ModernDryBoxGUI(QMainWindow):
         
         layout.addRow("Seed:", seed_widget)
         
-        # Add some spacing
-        spacer = QWidget()
-        spacer.setFixedHeight(20)
-        layout.addRow(spacer)
+        # Add vertical spacer to push content to top
+        layout.addRow(QLabel(""))  # Empty label for spacing
         
         # Info card
         info_card = ModernCard()
@@ -1157,6 +1118,7 @@ class ModernDryBoxGUI(QMainWindow):
         
         # Bearer type
         self.bearer_combo = QComboBox()
+        self.bearer_combo.setMinimumHeight(36)
         self.bearer_combo.addItems(AVAILABLE_BEARERS)
         self.bearer_combo.currentTextChanged.connect(self.update_bearer_params)
         layout.addRow("Bearer Type:", self.bearer_combo)
@@ -1181,11 +1143,13 @@ class ModernDryBoxGUI(QMainWindow):
         
         # Vocoder
         self.vocoder_combo = QComboBox()
+        self.vocoder_combo.setMinimumHeight(36)
         self.vocoder_combo.addItems(AVAILABLE_VOCODERS)
         layout.addRow("Vocoder:", self.vocoder_combo)
         
         # Channel
         self.channel_combo = QComboBox()
+        self.channel_combo.setMinimumHeight(36)
         self.channel_combo.addItems(AVAILABLE_CHANNELS)
         self.channel_combo.currentTextChanged.connect(self.update_channel_params)
         layout.addRow("Channel:", self.channel_combo)
@@ -1233,27 +1197,45 @@ class ModernDryBoxGUI(QMainWindow):
         
         # Control buttons
         controls_widget = QWidget()
-        controls_layout = QGridLayout(controls_widget)
-        controls_layout.setSpacing(12)
+        controls_layout = QVBoxLayout(controls_widget)
+        controls_layout.setSpacing(16)
         
-        # Main actions
+        # Main action buttons row
+        action_row = QHBoxLayout()
+        action_row.setSpacing(12)
+        
         self.run_btn = AnimatedButton("▶ Run Scenario", "primary")
+        self.run_btn.setMinimumHeight(48)
+        self.run_btn.setMinimumWidth(140)
         self.run_btn.clicked.connect(self.run_scenario)
-        controls_layout.addWidget(self.run_btn, 0, 0, 1, 2)
+        action_row.addWidget(self.run_btn)
         
         self.stop_btn = AnimatedButton("⏹ Stop", "danger")
+        self.stop_btn.setMinimumHeight(48)
+        self.stop_btn.setMinimumWidth(100)
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_scenario)
-        controls_layout.addWidget(self.stop_btn, 1, 0, 1, 2)
+        action_row.addWidget(self.stop_btn)
         
-        # File actions
+        controls_layout.addLayout(action_row)
+        
+        # File operations row
+        file_row = QHBoxLayout()
+        file_row.setSpacing(12)
+        
         self.save_btn = AnimatedButton("💾 Save", "secondary")
+        self.save_btn.setMinimumHeight(44)
+        self.save_btn.setMinimumWidth(100)
         self.save_btn.clicked.connect(self.save_scenario)
-        controls_layout.addWidget(self.save_btn, 2, 0)
+        file_row.addWidget(self.save_btn)
         
         self.load_btn = AnimatedButton("📂 Load", "secondary")
+        self.load_btn.setMinimumHeight(44)
+        self.load_btn.setMinimumWidth(100)
         self.load_btn.clicked.connect(self.load_scenario)
-        controls_layout.addWidget(self.load_btn, 2, 1)
+        file_row.addWidget(self.load_btn)
+        
+        controls_layout.addLayout(file_row)
         
         layout.addWidget(controls_widget)
         
