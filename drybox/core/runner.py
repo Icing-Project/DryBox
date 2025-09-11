@@ -253,7 +253,7 @@ class Runner:
             if channel_type == "awgn" and AWGNChannel:
                 snr_db = self.scenario.channel.get("snr_db", 20.0)
                 channel = AWGNChannel(snr_db, seed=self.seed)
-            elif channel_type == "fading" and RayleighFadingChannel:
+            elif channel_type in ["fading", "rayleigh"] and RayleighFadingChannel:
                 snr_db = self.scenario.channel.get("snr_db", 20.0)
                 fd_hz = self.scenario.channel.get("fd_hz", 50.0)
                 L = self.scenario.channel.get("L", 8)
@@ -542,7 +542,7 @@ def parse_args(argv: Optional[List[str]] = None):
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p.add_argument("--ui", action="store_true", default=True)
     p.add_argument("--no-ui", action="store_false", dest="ui")
-    p.add_argument("--plot", action="store_true", help="(reserved)")
+    p.add_argument("--plot", action="store_true", help="Generate plots after simulation completes")
     p.add_argument("--sweep-parallel", type=int, default=1, help="(reserved) parallelism per sweep value")
     return p.parse_args(argv)
 
@@ -597,6 +597,21 @@ def main(argv: Optional[List[str]] = None) -> int:
             ui_enabled=args.ui,
         )
         rc = runner.run() or rc
+        
+        # Generate plots if requested
+        if args.plot:
+            try:
+                import subprocess
+                plot_cmd = [
+                    sys.executable, "-m", "tools.plot_timeline",
+                    str(out_dir),
+                    "--type", "all"
+                ]
+                subprocess.run(plot_cmd, check=True)
+                print(f"[plot] Generated plots in: {out_dir}/plots/")
+            except Exception as e:
+                sys.stderr.write(f"[plot] Failed to generate plots: {e}\n")
+    
     return rc
 
 
