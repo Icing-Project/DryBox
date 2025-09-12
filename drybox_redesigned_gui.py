@@ -299,6 +299,17 @@ class ModernStyle:
             border: 1px solid {theme.border};
             selection-background-color: {theme.accent_primary};
             selection-color: white;
+            padding: 4px;
+            min-height: 100px;
+        }}
+        
+        QComboBox QAbstractItemView::item {{
+            min-height: 30px;
+            padding: 4px;
+        }}
+        
+        QComboBox QAbstractItemView::item:hover {{
+            background-color: {theme.bg_hover};
         }}
         
         /* Radio Buttons */
@@ -585,11 +596,12 @@ def get_available_adapters() -> Dict[str, str]:
     
     # Check adapters directory
     adapter_dir = Path("adapters")
+    
     if adapter_dir.exists():
         for file in adapter_dir.glob("*.py"):
             if file.name == "__init__.py":
                 continue
-            # Map file to expected class name
+            # Map file to expected class name - use file path format
             if file.name == "audio_test.py":
                 adapters["audio_test"] = "adapters/audio_test.py:AudioTestAdapter"
             elif file.name == "audio_wav_player.py":
@@ -599,7 +611,10 @@ def get_available_adapters() -> Dict[str, str]:
             elif file.name == "audio_enhanced_player.py":
                 adapters["audio_enhanced_player"] = "adapters/audio_enhanced_player.py:AudioEnhancedPlayer"
             elif file.name == "pingpong.py":
-                adapters["pingpong"] = "adapters/pingpong.py:PingPongAdapter"
+                adapters["pingpong"] = "adapters/pingpong.py:Adapter"
+            elif file.name == "audioblock.py":
+                # Skip base class
+                continue
                 
     # Add built-in adapters
     adapters["echo"] = "drybox.adapters.echo:EchoAdapter"
@@ -722,6 +737,7 @@ class AdapterConfigWidget(QGroupBox):
         
         self.type_combo = QComboBox()
         self.type_combo.setMinimumHeight(36)
+        self.type_combo.setMaximumHeight(36)
         adapter_types = sorted(self.adapter_specs.keys())
         self.type_combo.addItems(adapter_types)
         self.type_combo.currentTextChanged.connect(self.update_config)
@@ -1171,34 +1187,55 @@ class ModernDryBoxGUI(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setSpacing(20)
         
+        # Create a scroll area for the content
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background: transparent;
+            }}
+        """)
+        
+        # Content widget for scroll area
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(20)
+        
         # Adapters section
         adapters_label = QLabel("ADAPTER CONFIGURATION")
         adapters_label.setObjectName("section-title")
-        layout.addWidget(adapters_label)
+        content_layout.addWidget(adapters_label)
         
         # Adapter cards
         self.adapter_l = AdapterConfigWidget("LEFT")
-        layout.addWidget(self.adapter_l)
+        content_layout.addWidget(self.adapter_l)
         
         self.adapter_r = AdapterConfigWidget("RIGHT")
-        layout.addWidget(self.adapter_r)
+        content_layout.addWidget(self.adapter_r)
         
-        layout.addStretch()
+        # Add some spacing before controls
+        content_layout.addSpacing(20)
         
         # Control section
         controls_label = QLabel("SCENARIO CONTROL")
         controls_label.setObjectName("section-title")
-        layout.addWidget(controls_label)
+        content_layout.addWidget(controls_label)
         
         # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.hide()
-        layout.addWidget(self.progress_bar)
+        content_layout.addWidget(self.progress_bar)
         
-        # Control buttons
-        controls_widget = QWidget()
-        controls_layout = QVBoxLayout(controls_widget)
-        controls_layout.setSpacing(16)
+        # Control buttons container with fixed size
+        controls_container = QWidget()
+        controls_container.setMaximumHeight(150)
+        controls_layout = QVBoxLayout(controls_container)
+        controls_layout.setSpacing(12)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
         
         # Main action buttons row
         action_row = QHBoxLayout()
@@ -1217,6 +1254,7 @@ class ModernDryBoxGUI(QMainWindow):
         self.stop_btn.clicked.connect(self.stop_scenario)
         action_row.addWidget(self.stop_btn)
         
+        action_row.addStretch()
         controls_layout.addLayout(action_row)
         
         # File operations row
@@ -1235,9 +1273,18 @@ class ModernDryBoxGUI(QMainWindow):
         self.load_btn.clicked.connect(self.load_scenario)
         file_row.addWidget(self.load_btn)
         
+        file_row.addStretch()
         controls_layout.addLayout(file_row)
         
-        layout.addWidget(controls_widget)
+        controls_layout.addStretch()
+        content_layout.addWidget(controls_container)
+        
+        # Add stretch at the end
+        content_layout.addStretch()
+        
+        # Set the content widget to the scroll area
+        scroll_area.setWidget(content_widget)
+        layout.addWidget(scroll_area)
         
         return panel
         
