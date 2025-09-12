@@ -5,12 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="6ea4d331-bc2f-47c4-836c-3cb682ca1a79" name="Changes" comment="Clean repository: remove cache files and temporary directories&#10;&#10;- Remove all Python __pycache__ directories and .pyc files&#10;- Remove test output directories (except WAV/)&#10;- Remove IDE files, temporary scripts, and test files&#10;- Update modified configuration and test files&#10;- Add of drybox Alpha">
-      <change afterPath="$PROJECT_DIR$/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/adapters/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/adapters/audio_enhanced_player.py" beforeDir="false" afterPath="$PROJECT_DIR$/adapters/audio_enhanced_player.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/adapters/audio_recording_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/adapters/audio_recording_test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/adapters/audio_wav_player.py" beforeDir="false" afterPath="$PROJECT_DIR$/adapters/audio_wav_player.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/drybox_redesigned_gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/drybox_redesigned_gui.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -76,6 +71,7 @@
       <workItem from="1757175498661" duration="16026000" />
       <workItem from="1757497810057" duration="5879000" />
       <workItem from="1757578612827" duration="15699000" />
+      <workItem from="1757673501449" duration="685000" />
     </task>
     <task id="LOCAL-00001" summary="Clean repository: remove cache files and temporary directories&#10;&#10;- Remove all Python __pycache__ directories and .pyc files&#10;- Remove test output directories (except WAV/)&#10;- Remove IDE files, temporary scripts, and test files&#10;- Update modified configuration and test files&#10;- Add of drybox Alpha">
       <option name="closed" value="true" />
