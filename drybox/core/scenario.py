@@ -17,6 +17,12 @@ try:
 except ImportError as e:
     raise SystemExit("jsonschema is required. Install with `uv add jsonschema`") from e
 
+# NEW: use package resources so scenarios/schema work after installation
+try:
+    from importlib import resources
+except Exception as e:  # pragma: no cover
+    raise SystemExit("Python 3.9+ importlib.resources is required") from e
+
 
 class ScenarioValidationError(Exception):
     """Raised when the scenario YAML fails schema validation."""
@@ -41,17 +47,100 @@ class ScenarioResolved:
     frame_ms: int = 20  # cadence audio par défaut (v1)
     crypto: Dict[str, Any] = field(default_factory=dict)
 
-    # ---------- Loading & validation ----------
+    # ---------- Resource resolution helpers ----------
 
     @staticmethod
-    def _schema_path() -> pathlib.Path:
-        # repo_root/schema/scenario.schema.json
-        return pathlib.Path(__file__).resolve().parents[2] / "schema" / "scenario.schema.json"
+    def _read_text_from_pkg_path(pkg: str, *rel_parts: str) -> str | None:
+        """
+        Read a text resource from an installed package.
+        Returns None if path doesn't exist.
+        Works even when resources are inside wheels/zip.
+        """
+        try:
+            base = resources.files(pkg)
+        except ModuleNotFoundError:
+            return None
+
+        target = base
+        for part in rel_parts:
+            target = target.joinpath(part)
+
+        # Convert to a real filesystem path if needed
+        try:
+            with resources.as_file(target) as real_path:
+                if real_path.is_file():
+                    return real_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+        return None
+
+
+    @staticmethod
+    def _read_text_resource(pkg: str, name: str) -> Optional[str]:
+        """
+        Try to read a text resource from an installed package.
+        Returns None if not found.
+        """
+        try:
+            candidate = resources.files(pkg) / name
+            if candidate.is_file():
+                return candidate.read_text(encoding="utf-8")
+        except ModuleNotFoundError:
+            return None
+        return None
+
+    @staticmethod
+    def _resolve_scenario_text(path_or_name: Union[str, pathlib.Path]) -> str:
+        """
+        Load scenario YAML from either:
+        - a real filesystem path (relative to CWD or absolute)
+        - a packaged resource under drybox.scenarios (by filename or with 'scenarios/' prefix)
+        Returns the YAML text; raises FileNotFoundError if not found anywhere.
+        """
+        p = pathlib.Path(path_or_name)
+
+        # 1) Direct filesystem path
+        if p.exists() and p.is_file():
+            return p.read_text(encoding="utf-8")
+
+        # 2) Packaged resource under drybox/scenarios
+        # Accept "scenarios/foo.yaml" or just "foo.yaml"
+        name = p.name
+        text = ScenarioResolved._read_text_from_pkg_path("drybox", "scenarios", name)
+        if text is not None:
+            return text
+
+        if p.parts and p.parts[0] == "scenarios" and len(p.parts) > 1:
+            text = ScenarioResolved._read_text_from_pkg_path("drybox", *p.parts)
+            if text is not None:
+                return text
+
+        raise FileNotFoundError(
+            "Scenario file not found. Tried:\n"
+            f"  - {p}\n"
+            f"  - [pkg] drybox/scenarios/{name}"
+        )
 
     @staticmethod
     def _load_schema() -> Dict[str, Any]:
-        with open(ScenarioResolved._schema_path(), "r", encoding="utf-8") as fp:
-            return json.load(fp)
+        """
+        Load JSON schema from packaged data (drybox/schema/scenario.schema.json).
+        Falls back to repo-relative path only if running from a checkout without package data.
+        """
+        # Preferred: packaged resource drybox/schema/scenario.schema.json
+        text = ScenarioResolved._read_text_from_pkg_path("drybox", "schema", "scenario.schema.json")
+        if text is not None:
+            return json.loads(text)
+
+        # Fallback for editable checkouts
+        fallback = pathlib.Path(__file__).resolve().parents[1] / "schema" / "scenario.schema.json"
+        if fallback.exists():
+            return json.loads(fallback.read_text(encoding="utf-8"))
+
+        raise FileNotFoundError(
+            "Could not locate schema 'scenario.schema.json' "
+            "(looked in package 'drybox/schema' and repo 'schema/')."
+        )
 
     @staticmethod
     def _apply_defaults(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -68,11 +157,13 @@ class ScenarioResolved:
         out.setdefault("vocoder", {})
         return out
 
+    # ---------- Loading & validation ----------
+
     @classmethod
     def from_yaml(cls, path: Union[str, pathlib.Path]) -> "ScenarioResolved":
-        p = pathlib.Path(path)
-        with open(p, "r", encoding="utf-8") as fp:
-            raw = yaml.safe_load(fp) or {}
+        # Load YAML text from FS or packaged resource (Step 3)
+        yaml_text = cls._resolve_scenario_text(path)
+        raw = yaml.safe_load(yaml_text) or {}
         if not isinstance(raw, dict):
             raise ScenarioValidationError("Scenario YAML must define a mapping at top level")
 
