@@ -1,6 +1,7 @@
 */__pycache__
 .venv
-uv.lock
 .idea
 .code
 .vscode
+.claude
+runs/*
