@@ -1,0 +1,41 @@
+# DryBox v2 scenario.yaml
+
+mode: audio                 # "byte" or "audio"
+duration_ms: 5000           # integer, milliseconds
+seed: 123456                # integer, random by default
+
+# --- Network settings (shared link) ---
+network:
+  bearer: volte_evs          # "volte_evs", "cs_gsm", "pstn_g711", "ott_udp"
+  loss_rate: 0.00            # float, 0.0 to 1.0
+  latency_ms: 20             # integer
+  jitter_ms: 5               # integer
+  reorder_rate: 0.00         # float
+  ge_p_good_bad: 0.001       # float
+  ge_p_bad_good: 0.1         # float
+  mtu_bytes: 1500            # integer
+
+# --- Left Adapter ---
+left:
+  adapter: nade_adapter.py    # file in adapters folder
+  gain: 1.0                   # float
+  setting2: ""                # text input
+  modem:
+    vocoder: none             # "none", "amr12k2_mock", "evs13k2_mock", "opus_nb_mock"
+    vad_dtx: false            # boolean
+    channel_type: none        # "none", "awgn", "fading"
+    snr_db: 20                # integer
+    doppler_hz: 50            # max Doppler frequency in Hz
+    num_paths: 8              # number of multipath components
+
+# --- Right Adapter ---
+right:
+  adapter: nade_adapter.py
+  gain: 1.0
+  modem:
+    vocoder: none
+    vad_dtx: false
+    channel_type: none
+    snr_db: 20
+    doppler_hz: 50
+    num_paths: 8
