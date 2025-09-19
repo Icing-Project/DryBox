@@ -20,3 +20,26 @@ dev = [
 gui = [
     "PyQt6>=6.0.0",
 ]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = []  # prevent top-level .py files from being packaged as modules
+
+[tool.setuptools.packages.find]
+include = ["drybox*", "adapters*"]   # include example adapters if you keep them top-level
+exclude = ["runs*", "docs*", "tests*"]
+
+[tool.setuptools.package-data]
+drybox = [
+  "scenarios/*.yaml",
+  "schema/*.json",
+  "WAV/*"
+]
+
+[project.scripts]          # optional sugar so you can do `uv run drybox` / `uv run drybox-qt`
+drybox = "drybox.ui.__main__:main"
+drybox-run = "drybox.core.runner:main"
