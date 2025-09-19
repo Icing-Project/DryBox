@@ -7,6 +7,15 @@ import sys
 sys.path.insert(0, '.')
 from adapters.audioblock import AudioBlockAdapter
 
+ABI_VERSION = "1.0"
+
+def nade_capabilities():
+    return {
+        "abi_version": ABI_VERSION,
+        "bytelink": True,
+        "audioblock": True,
+        "audioparams": {"sr": 8000, "block": 160},
+    }
 
 class AudioTestAdapter(AudioBlockAdapter):
     """Test adapter that generates/receives sine waves"""
