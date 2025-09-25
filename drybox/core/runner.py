@@ -251,8 +251,8 @@ class Runner:
         # 3) Réassemblage (timeout = 2×RTT_est ; RTT_est ~ 2×latency_ms si fourni)
         lat_ms = int(self.scenario.bearer.params.get("latency_ms", 60))
         rtt_est = max(1, 2 * lat_ms)
-        reas_l = SARReassembler(rtt_estimate_ms=2 * rtt_est, expect_header=sar_active)  # R->L
-        reas_r = SARReassembler(rtt_estimate_ms=2 * rtt_est, expect_header=sar_active)  # L->R
+        reasm_r2l = SARReassembler(rtt_estimate_ms=2 * rtt_est, expect_header=sar_active)  # R->L
+        reasm_l2r = SARReassembler(rtt_estimate_ms=2 * rtt_est, expect_header=sar_active)  # L->R
 
         # 4) Boucle
         duration = int(self.scenario.duration_ms)
