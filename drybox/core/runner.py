@@ -23,6 +23,10 @@ except ImportError as e:
         "PyYAML is required. Install with `uv add pyyaml` or `pip install pyyaml`."
     ) from e
 
+import importlib.util
+import pathlib
+from types import ModuleType
+
 try:
     import numpy as np
 except ImportError:
@@ -79,24 +83,37 @@ except ImportError:
 # --------- Utils: chargement adaptateurs ----------
 def _load_class_from_path(spec: str):
     """
-    Charge une classe à partir d'une spéc 'path/to/module.py:ClassName'.
-    Pas de cache global -> isolation simple entre runs.
+    Load a class from either:
+      - a filesystem path to a .py file, with optional ':ClassName'
+      - a Python package/module path, with optional ':ClassName'
+    If no class is provided, defaults to 'Adapter'.
     """
-    if ":" not in spec:
-        raise ValueError(f"Adapter spec must be 'path.py:Class', got: {spec}")
-    path_str, class_name = spec.split(":", 1)
-    mod_path = pathlib.Path(path_str).resolve()
-    if not mod_path.exists():
-        raise FileNotFoundError(f"Adapter module not found: {mod_path}")
-    module_name = f"dbx_adapter_{mod_path.stem}_{abs(hash(mod_path))}"
-    spec_obj = importlib.util.spec_from_file_location(module_name, str(mod_path))
-    if spec_obj is None or spec_obj.loader is None:
-        raise ImportError(f"Cannot load module from: {mod_path}")
-    module = importlib.util.module_from_spec(spec_obj)
-    spec_obj.loader.exec_module(module)
-    cls = getattr(module, class_name, None)
-    if cls is None:
-        raise AttributeError(f"Class '{class_name}' not found in {mod_path}")
+    if ":" in spec:
+        mod_spec, class_name = spec.split(":", 1)
+    else:
+        mod_spec, class_name = spec, "Adapter"
+
+    p = pathlib.Path(mod_spec)
+
+    # A) Try loading from file if it looks like a file path
+    try_file = p.is_file() and p.suffix == ".py"
+    module: ModuleType | None = None
+    if try_file:
+        module_name = f"_drybox_ext_{p.stem}"
+        spec_obj = importlib.util.spec_from_file_location(module_name, str(p))
+        if spec_obj is None or spec_obj.loader is None:
+            raise ImportError(f"Cannot load module from: {mod_spec}")
+        module = importlib.util.module_from_spec(spec_obj)
+        spec_obj.loader.exec_module(module)  # type: ignore[attr-defined]
+    else:
+        # B) Treat as an importable package/module (works for package dirs on sys.path)
+        module = importlib.import_module(mod_spec)
+
+    try:
+        cls = getattr(module, class_name)
+    except AttributeError as e:
+        raise ImportError(f"Class '{class_name}' not found in module '{module.__name__}'") from e
+
     return cls
 
 
@@ -282,7 +299,7 @@ class Runner:
                 fd_hz = self.scenario.channel.get("fd_hz", 50.0)
                 L = self.scenario.channel.get("L", 8)
                 channel = RayleighFadingChannel(snr_db, fd_hz, L, seed=self.seed)
-        
+
         # 4) Vocoder setup (Mode B only)
         vocoder_l2r = None
         vocoder_r2l = None
@@ -292,7 +309,7 @@ class Runner:
                 vad_dtx = self.scenario.vocoder.get("vad_dtx", False)
                 vocoder_l2r = create_vocoder(vocoder_type, vad_dtx, seed=self.seed)
                 vocoder_r2l = create_vocoder(vocoder_type, vad_dtx, seed=self.seed + 1)
-        
+
         # 5) Réassemblage (timeout = 2×RTT_est ; RTT_est ~ 2×latency_ms si fourni)
         lat_ms = int(self.scenario.bearer.params.get("latency_ms", 60))
         rtt_est = max(1, 2 * lat_ms)
@@ -412,7 +429,7 @@ class Runner:
                     # Mode B: AudioBlock
                     if np is None:
                         raise SystemExit("Mode B (audio) requires numpy. Install with `pip install numpy`.")
-                    
+
                     # Check if both adapters support AudioBlock
                     if hasattr(left, "pull_tx_block") and hasattr(right, "push_rx_block"):
                         # L->R audio flow
@@ -446,9 +463,9 @@ class Runner:
                                         bitstream = vocoder_l2r.encode(pcm_processed)
                                         pcm_processed = vocoder_l2r.decode(bitstream)
                                         pcm_processed = vocoder_l2r.process_frame(pcm_processed)
-                                
+
                                 right.push_rx_block(pcm_processed, self.t_ms)  # type: ignore[attr-defined]
-                                
+
                                 # Metrics
                                 self.metrics.write_metric(
                                     t_ms=self.t_ms, side="L", layer=LAYER_AUDIOBLOCK, event=EVENT_TX,
@@ -460,7 +477,7 @@ class Runner:
                                 )
                         except Exception as e:
                             print(f"[ERROR] L->R audio: {e}", file=sys.stderr)
-                    
+
                     if hasattr(right, "pull_tx_block") and hasattr(left, "push_rx_block"):
                         # R->L audio flow
                         try:
@@ -493,9 +510,9 @@ class Runner:
                                         bitstream = vocoder_r2l.encode(pcm_processed)
                                         pcm_processed = vocoder_r2l.decode(bitstream)
                                         pcm_processed = vocoder_r2l.process_frame(pcm_processed)
-                                
+
                                 left.push_rx_block(pcm_processed, self.t_ms)  # type: ignore[attr-defined]
-                                
+
                                 # Metrics
                                 self.metrics.write_metric(
                                     t_ms=self.t_ms, side="R", layer=LAYER_AUDIOBLOCK, event=EVENT_TX,
@@ -621,7 +638,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             ui_enabled=args.ui,
         )
         rc = runner.run() or rc
-        
+
         # Generate plots if requested
         if args.plot:
             try:
@@ -635,7 +652,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"[plot] Generated plots in: {out_dir}/plots/")
             except Exception as e:
                 sys.stderr.write(f"[plot] Failed to generate plots: {e}\n")
-    
+
     return rc
 
 
