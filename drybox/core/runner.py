@@ -263,7 +263,7 @@ class Runner:
         if flow.vocoder is None:
             return pcm_processed
 
-        loss_rate = self.scenario.bearer.params.get("loss_rate", 0.0)
+        loss_rate = self.bearer_params.get("loss_rate", 0.0)
         if self.rng.random() < loss_rate:
             # Frame lost - PLC
             pcm_processed = flow.vocoder.process_frame(None)
@@ -422,42 +422,64 @@ class Runner:
         right, right_caps = self._load_adapter(self.right_adapter_spec, "R", r_crypto)
         self._require_mode_supported(left_caps, right_caps)
 
-        # 1) Configure bearer (toujours présent — même en mode audio pour MTU/tempo)
-        bearer_l2r: DatagramBearer = make_bearer(self.scenario.bearer.type, self.scenario.bearer.params, self.rng)
-        bearer_r2l: DatagramBearer = make_bearer(self.scenario.bearer.type, self.scenario.bearer.params, self.rng)
+        # 1) Configure bearer (translate 'network' => bearer type + params)
+        # Schema: network: { bearer: "volte_evs", latency_ms: 20, ... }
+        network_cfg = dict(self.scenario.network or {})
+        bearer_type = network_cfg.get("bearer", "volte_evs")
+        # params are everything in network except the 'bearer' key
+        bearer_params = {k: v for k, v in network_cfg.items() if k != "bearer"}
+
+        # store for helpers (loss_rate, latency, mtu lookup)
+        self.bearer_type = bearer_type
+        self.bearer_params = bearer_params
+
+        bearer_l2r: DatagramBearer = make_bearer(bearer_type, bearer_params, self.rng)
+        bearer_r2l: DatagramBearer = make_bearer(bearer_type, bearer_params, self.rng)
+
 
         # 2) SAR-lite si MTU < SDU_MAX
         sdu_max = int(left_caps.get("sdu_max_bytes", DEFAULT_SDU_MAX))
-        mtu = int(self.scenario.bearer.params.get("mtu_bytes", sdu_max))
+        mtu = int(self.bearer_params.get("mtu_bytes", sdu_max))
         sar_active = mtu < sdu_max
         frag_l2r = SARFragmenter(mtu_bytes=mtu) if sar_active else None
         frag_r2l = SARFragmenter(mtu_bytes=mtu) if sar_active else None
 
         # 3) Channel setup (Mode B only)
+        # In schema, channel config lives in adapter 'modem' (left/right). We'll prefer left.modem.
         channel = None
-        if self.scenario.mode == "audio" and self.scenario.channel:
-            channel_type = self.scenario.channel.get("type")
+        left_modem_cfg = dict(self.scenario.left.get("modem", {}) or {})
+        # If left.modem empty, fallback to right.modem
+        if not left_modem_cfg:
+            left_modem_cfg = dict(self.scenario.right.get("modem", {}) or {})
+
+        channel_type = left_modem_cfg.get("channel_type")
+        if self.scenario.mode == "audio" and channel_type:
             if channel_type == "awgn" and AWGNChannel:
-                snr_db = self.scenario.channel.get("snr_db", 20.0)
+                snr_db = left_modem_cfg.get("snr_db", 20.0)
                 channel = AWGNChannel(snr_db, seed=self.seed)
             elif channel_type in ["fading", "rayleigh"] and RayleighFadingChannel:
-                snr_db = self.scenario.channel.get("snr_db", 20.0)
-                fd_hz = self.scenario.channel.get("fd_hz", 50.0)
-                L = self.scenario.channel.get("L", 8)
+                snr_db = left_modem_cfg.get("snr_db", 20.0)
+                fd_hz = left_modem_cfg.get("doppler_hz", 50.0)
+                L = left_modem_cfg.get("num_paths", 8)
                 channel = RayleighFadingChannel(snr_db, fd_hz, L, seed=self.seed)
+
         
         # 4) Vocoder setup (Mode B only)
         vocoder_l2r = None
         vocoder_r2l = None
-        if self.scenario.mode == "audio" and self.scenario.vocoder and create_vocoder:
-            vocoder_type = self.scenario.vocoder.get("type")
-            if vocoder_type:
-                vad_dtx = self.scenario.vocoder.get("vad_dtx", False)
-                vocoder_l2r = create_vocoder(vocoder_type, vad_dtx, seed=self.seed)
-                vocoder_r2l = create_vocoder(vocoder_type, vad_dtx, seed=self.seed + 1)
+        left_modem_cfg = dict(self.scenario.left.get("modem", {}) or {})
+        right_modem_cfg = dict(self.scenario.right.get("modem", {}) or {})
+
+        # prefer explicit vocoder type set in modem config
+        vocoder_type = left_modem_cfg.get("vocoder") or right_modem_cfg.get("vocoder")
+        if self.scenario.mode == "audio" and vocoder_type and create_vocoder:
+            vad_dtx = left_modem_cfg.get("vad_dtx", False) or right_modem_cfg.get("vad_dtx", False)
+            vocoder_l2r = create_vocoder(vocoder_type, vad_dtx, seed=self.seed)
+            vocoder_r2l = create_vocoder(vocoder_type, vad_dtx, seed=self.seed + 1)
+
         
         # 5) Réassemblage (timeout = 2×RTT_est ; RTT_est ~ 2×latency_ms si fourni)
-        lat_ms = int(self.scenario.bearer.params.get("latency_ms", 60))
+        lat_ms = int(self.bearer_params.get("latency_ms", 60))
         rtt_est = max(1, 2 * lat_ms)
         reasm_r2l = SARReassembler(rtt_estimate_ms=2 * rtt_est, expect_header=sar_active)  # R->L
         reasm_l2r = SARReassembler(rtt_estimate_ms=2 * rtt_est, expect_header=sar_active)  # L->R
@@ -608,16 +630,18 @@ def parse_args(argv: Optional[List[str]] = None):
 def _write_resolved_yaml(path: pathlib.Path, scen: ScenarioResolved) -> None:
     """
     Écrit le scénario résolu utilisé pour le run (toujours émis).
+    Use 'network' + left/right per schema (not legacy bearer/channel/vocoder attrs).
     """
     doc = {
         "mode": scen.mode,
         "duration_ms": scen.duration_ms,
         "seed": scen.seed,
-        "bearer": {"type": scen.bearer.type, **scen.bearer.params},
-        "channel": scen.channel,
-        "vocoder": scen.vocoder,
+        "network": dict(scen.network) if scen.network is not None else {},
+        "left": dict(scen.left) if scen.left is not None else {},
+        "right": dict(scen.right) if scen.right is not None else {},
         "cfo_hz": scen.cfo_hz,
         "ppm": scen.ppm,
+        "crypto": dict(scen.crypto or {}),
     }
     with open(path, "w", encoding="utf-8") as fp:
         yaml.safe_dump(doc, fp, sort_keys=False)
