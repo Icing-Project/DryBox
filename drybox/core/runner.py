@@ -221,6 +221,128 @@ class Runner:
             "",
         ]
         (self.out_dir / "pubkeys.txt").write_text("\n".join(txt), encoding="utf-8")
+    
+    # Helpers
+    def _safe_call(self, label: str, fn, *args, **kwargs):
+        """
+        Helper to call adapter methods and catch exceptions; returns None on error.
+        """
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            print(f"[ERROR] {label}: {e}", file=sys.stderr)
+            return None
+
+    def _apply_vocoder_and_loss(self, pcm_in, vocoder, rx_side):
+        """
+        Apply vocoder encode/decode/process and simulate packet loss per bearer loss_rate.
+        Returns pcm_processed and optionally writes DROP metric if loss occurs.
+        """
+        pcm_processed = pcm_in
+        if vocoder is None:
+            return pcm_processed
+
+        loss_rate = self.scenario.bearer.params.get("loss_rate", 0.0)
+        if self.rng.random() < loss_rate:
+            # Frame lost - PLC
+            pcm_processed = vocoder.process_frame(None)
+            self.metrics.write_metric(
+                t_ms=self.t_ms, side=rx_side, layer=LAYER_AUDIOBLOCK, event=EVENT_DROP,
+                per=1.0
+            )
+        else:
+            bitstream = vocoder.encode(pcm_processed)
+            pcm_processed = vocoder.decode(bitstream)
+            pcm_processed = vocoder.process_frame(pcm_processed)
+        return pcm_processed
+
+    def _write_audio_tx_rx_metrics(self, tx_side: str, rx_side: str, rtt_est: float):
+        # Keep same metric keys as original
+        self.metrics.write_metric(
+            t_ms=self.t_ms, side=tx_side, layer=LAYER_AUDIOBLOCK, event=EVENT_TX,
+            rtt_ms_est=float(rtt_est)
+        )
+        self.metrics.write_metric(
+            t_ms=self.t_ms, side=rx_side, layer=LAYER_AUDIOBLOCK, event=EVENT_RX,
+            latency_ms=0.0
+        )
+
+    def _process_audio_direction(self, src, dst, vocoder, rtt_est, tx_side: str, rx_side: str, label: str, channel=None):
+        """
+        Process one audio direction (src -> dst). Mirrors original behaviour exactly.
+        """
+        pcm = self._safe_call(f"{label} audio pull", src.pull_tx_block, self.t_ms)
+        if not pcm or len(pcm) == 0:
+            return
+
+        pcm_processed = pcm
+
+        # Channel effects + SNR metric (if the channel supports it)
+        if channel is not None:
+            pcm_processed = channel.apply(pcm)
+            if hasattr(channel, "get_estimated_snr"):
+                snr_est = channel.get_estimated_snr(pcm, pcm_processed)
+                # Note: original wrote this with event=EVENT_RX and side swapped
+                self.metrics.write_metric(
+                    t_ms=self.t_ms, side=rx_side, layer=LAYER_AUDIOBLOCK, event=EVENT_RX,
+                    snr_db_est=snr_est
+                )
+
+        # Vocoder + packet loss simulation
+        pcm_processed = self._apply_vocoder_and_loss(pcm_processed, vocoder, rx_side)
+
+        # Push to destination (preserves same type ignores)
+        self._safe_call(f"{label} audio push", dst.push_rx_block, pcm_processed, self.t_ms)
+
+        # Metrics (tx/rx)
+        self._write_audio_tx_rx_metrics(tx_side, rx_side, rtt_est)
+    
+    def _poll_and_send_bytemode(self, src, side_label: str, frag: Optional[SARFragmenter], bearer: DatagramBearer, cap_side: str, rtt_est, budget_per_tick):
+        """
+        Poll src.poll_link_tx, normalize sdus, fragment if needed and send via bearer.
+        cap_side used for capture/metrics (original code used L for left, R for right).
+        """
+        res = self._safe_call(f"{side_label} poll_link_tx", src.poll_link_tx, budget_per_tick)
+        if not res:
+            return
+
+        try:
+            sdus: List[bytes] = [b if isinstance(b, (bytes, bytearray)) else b[0] for b in res]
+        except Exception:
+            sdus = []
+
+        for sdu in sdus:
+            payloads = [sdu]
+            if frag is not None:
+                payloads = frag.fragment(sdu)
+            for p in payloads:
+                bearer.send(p, now_ms=self.t_ms)
+                self.cap.write(t_ms=self.t_ms, side=cap_side, layer=LAYER_BEARER, event=EVENT_TX, data=bytes(p))
+                self.metrics.write_metric(
+                    t_ms=self.t_ms, side=cap_side, layer=LAYER_BEARER, event=EVENT_TX, rtt_ms_est=float(rtt_est)
+                )
+        
+    def _deliver_bearer_to_adapter(self, dat, bearer, reassembler, dst_adapter, dst_side_for_metrics: str, src_side_for_cap: str):
+        self.cap.write(t_ms=self.t_ms, side=src_side_for_cap, layer=LAYER_BEARER, event=EVENT_RX, data=bytes(dat.payload))
+        lat = float(self.t_ms - dat.sent_ms)
+        sdu: Optional[bytes] = dat.payload
+        if reassembler is not None:
+            sdu = reassembler.push_fragment(dat.payload, now_ms=self.t_ms)
+        if sdu is not None and hasattr(dst_adapter, "on_link_rx"):
+            dst_adapter.on_link_rx(sdu)
+            st = bearer.stats()
+            # identical metric writes as existing code
+            self.metrics.write_metric(
+                t_ms=self.t_ms,
+                side=dst_side_for_metrics,
+                layer=LAYER_BYTELINK,
+                event=EVENT_RX,
+                latency_ms=lat,
+                jitter_ms=st.jitter_ms,
+                loss_rate=st.loss_rate,
+                reorder_rate=st.reorder_rate,
+            )
+
 
     # --------- Exécution ----------
     def run(self) -> int:
@@ -269,6 +391,8 @@ class Runner:
         sar_active = mtu < sdu_max
         frag_l2r = SARFragmenter(mtu_bytes=mtu) if sar_active else None
         frag_r2l = SARFragmenter(mtu_bytes=mtu) if sar_active else None
+        reasm_l2r = SARReassembler() if sar_active else None
+        reasm_r2l = SARReassembler() if sar_active else None
 
         # 3) Channel setup (Mode B only)
         channel = None
@@ -320,93 +444,34 @@ class Runner:
                 if self.scenario.mode == "byte":
                     # LEFT -> BEARER
                     if hasattr(left, "poll_link_tx"):
-                        try:
-                            res = left.poll_link_tx(budget_per_tick)  # type: ignore[attr-defined]
-                            sdus: List[bytes] = [
-                                b if isinstance(b, (bytes, bytearray)) else b[0] for b in (res or [])
-                            ]  # type: ignore[index]
-                        except Exception:
-                            sdus = []
-                        for sdu in sdus:
-                            payloads = [sdu]
-                            if sar_active and frag_l2r is not None:
-                                payloads = frag_l2r.fragment(sdu)
-                            for p in payloads:
-                                bearer_l2r.send(p, now_ms=self.t_ms)
-                                self.cap.write(t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_TX,
-                                               data=bytes(p))
-                                self.metrics.write_metric(
-                                    t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_TX,
-                                    rtt_ms_est=float(rtt_est)
-                                )
+                        self._poll_and_send_bytemode(left, "LEFT", frag_l2r, bearer_l2r, "L", rtt_est, budget_per_tick)
 
                     # RIGHT -> BEARER
                     if hasattr(right, "poll_link_tx"):
-                        try:
-                            res_r = right.poll_link_tx(budget_per_tick)  # type: ignore[attr-defined]
-                            sdus_r: List[bytes] = [
-                                b if isinstance(b, (bytes, bytearray)) else b[0] for b in (res_r or [])
-                            ]  # type: ignore[index]
-                        except Exception:
-                            sdus_r = []
-                        for sdu in sdus_r:
-                            payloads = [sdu]
-                            if sar_active and frag_r2l is not None:
-                                payloads = frag_r2l.fragment(sdu)
-                            for p in payloads:
-                                bearer_r2l.send(p, now_ms=self.t_ms)
-                                self.cap.write(t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_TX,
-                                               data=bytes(p))
-                                self.metrics.write_metric(
-                                    t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_TX,
-                                    rtt_ms_est=float(rtt_est)
-                                )
+                        self._poll_and_send_bytemode(right, "RIGHT", frag_r2l, bearer_r2l, "R", rtt_est, budget_per_tick)
+
 
                     # (3) Livraison via bearer L->R
                     for dat in bearer_l2r.poll_deliver(self.t_ms):
-                        self.cap.write(t_ms=self.t_ms, side="L", layer=LAYER_BEARER, event=EVENT_RX,
-                                       data=bytes(dat.payload))
-                        lat = float(self.t_ms - dat.sent_ms)
-                        sdu: Optional[bytes] = dat.payload
-                        if sar_active:
-                            sdu = reas_r.push_fragment(dat.payload, now_ms=self.t_ms)
-                        if sdu is not None and hasattr(right, "on_link_rx"):
-                            right.on_link_rx(sdu)  # type: ignore[attr-defined]
-                            st = bearer_l2r.stats()
-                            self.metrics.write_metric(
-                                t_ms=self.t_ms,
-                                side="R",
-                                layer=LAYER_BYTELINK,
-                                event=EVENT_RX,
-                                latency_ms=lat,
-                                jitter_ms=st.jitter_ms,
-                                loss_rate=st.loss_rate,
-                                reorder_rate=st.reorder_rate,
-                            )
-                            bytes_rx_r += len(sdu)
+                        self._deliver_bearer_to_adapter(
+                            dat=dat,
+                            bearer=bearer_l2r,
+                            reassembler=reasm_l2r,
+                            dst_adapter=right,
+                            dst_side_for_metrics="R",
+                            src_side_for_cap="L",
+                        )
 
                     # (4) Livraison via bearer R->L
                     for dat in bearer_r2l.poll_deliver(self.t_ms):
-                        self.cap.write(t_ms=self.t_ms, side="R", layer=LAYER_BEARER, event=EVENT_RX,
-                                       data=bytes(dat.payload))
-                        lat = float(self.t_ms - dat.sent_ms)
-                        sdu: Optional[bytes] = dat.payload
-                        if sar_active:
-                            sdu = reas_l.push_fragment(dat.payload, now_ms=self.t_ms)
-                        if sdu is not None and hasattr(left, "on_link_rx"):
-                            left.on_link_rx(sdu)  # type: ignore[attr-defined]
-                            st = bearer_r2l.stats()
-                            self.metrics.write_metric(
-                                t_ms=self.t_ms,
-                                side="L",
-                                layer=LAYER_BYTELINK,
-                                event=EVENT_RX,
-                                latency_ms=lat,
-                                jitter_ms=st.jitter_ms,
-                                loss_rate=st.loss_rate,
-                                reorder_rate=st.reorder_rate,
-                            )
-                            bytes_rx_l += len(sdu)
+                        self._deliver_bearer_to_adapter(
+                            dat=dat,
+                            bearer=bearer_r2l,
+                            reassembler=reasm_r2l,
+                            dst_adapter=left,
+                            dst_side_for_metrics="L",
+                            src_side_for_cap="R",
+                        )
 
                 elif self.scenario.mode == "audio":
                     # Mode B: AudioBlock
@@ -415,98 +480,24 @@ class Runner:
                     
                     # Check if both adapters support AudioBlock
                     if hasattr(left, "pull_tx_block") and hasattr(right, "push_rx_block"):
-                        # L->R audio flow
-                        try:
-                            pcm_l = left.pull_tx_block(self.t_ms)  # type: ignore[attr-defined]
-                            if pcm_l is not None and len(pcm_l) > 0:
-                                # Apply channel effects if configured
-                                pcm_processed = pcm_l
-                                if channel is not None:
-                                    pcm_processed = channel.apply(pcm_l)
-                                    # Estimate SNR for metrics
-                                    if hasattr(channel, 'get_estimated_snr'):
-                                        snr_est = channel.get_estimated_snr(pcm_l, pcm_processed)
-                                        self.metrics.write_metric(
-                                            t_ms=self.t_ms, side="R", layer=LAYER_AUDIOBLOCK, event=EVENT_RX,
-                                            snr_db_est=snr_est
-                                        )
-                                # Apply vocoder if configured
-                                if vocoder_l2r is not None:
-                                    # Simulate packet loss based on bearer loss rate
-                                    loss_rate = self.scenario.bearer.params.get("loss_rate", 0.0)
-                                    if self.rng.random() < loss_rate:
-                                        # Frame lost - apply PLC
-                                        pcm_processed = vocoder_l2r.process_frame(None)
-                                        self.metrics.write_metric(
-                                            t_ms=self.t_ms, side="R", layer=LAYER_AUDIOBLOCK, event=EVENT_DROP,
-                                            per=1.0  # Packet error rate = 1 for this frame
-                                        )
-                                    else:
-                                        # Normal processing
-                                        bitstream = vocoder_l2r.encode(pcm_processed)
-                                        pcm_processed = vocoder_l2r.decode(bitstream)
-                                        pcm_processed = vocoder_l2r.process_frame(pcm_processed)
-                                
-                                right.push_rx_block(pcm_processed, self.t_ms)  # type: ignore[attr-defined]
-                                
-                                # Metrics
-                                self.metrics.write_metric(
-                                    t_ms=self.t_ms, side="L", layer=LAYER_AUDIOBLOCK, event=EVENT_TX,
-                                    rtt_ms_est=float(rtt_est)
-                                )
-                                self.metrics.write_metric(
-                                    t_ms=self.t_ms, side="R", layer=LAYER_AUDIOBLOCK, event=EVENT_RX,
-                                    latency_ms=0.0  # Direct passthrough for now
-                                )
-                        except Exception as e:
-                            print(f"[ERROR] L->R audio: {e}", file=sys.stderr)
+                        self._process_audio_direction(
+                            src=left, dst=right,
+                            vocoder=vocoder_l2r,
+                            rtt_est=rtt_est,
+                            tx_side="L", rx_side="R",
+                            label="L->R",
+                            channel=channel,
+                        )
                     
                     if hasattr(right, "pull_tx_block") and hasattr(left, "push_rx_block"):
-                        # R->L audio flow
-                        try:
-                            pcm_r = right.pull_tx_block(self.t_ms)  # type: ignore[attr-defined]
-                            if pcm_r is not None and len(pcm_r) > 0:
-                                # Apply channel effects if configured
-                                pcm_processed = pcm_r
-                                if channel is not None:
-                                    pcm_processed = channel.apply(pcm_r)
-                                    # Estimate SNR for metrics
-                                    if hasattr(channel, 'get_estimated_snr'):
-                                        snr_est = channel.get_estimated_snr(pcm_r, pcm_processed)
-                                        self.metrics.write_metric(
-                                            t_ms=self.t_ms, side="L", layer=LAYER_AUDIOBLOCK, event=EVENT_RX,
-                                            snr_db_est=snr_est
-                                        )
-                                # Apply vocoder if configured
-                                if vocoder_r2l is not None:
-                                    # Simulate packet loss based on bearer loss rate
-                                    loss_rate = self.scenario.bearer.params.get("loss_rate", 0.0)
-                                    if self.rng.random() < loss_rate:
-                                        # Frame lost - apply PLC
-                                        pcm_processed = vocoder_r2l.process_frame(None)
-                                        self.metrics.write_metric(
-                                            t_ms=self.t_ms, side="L", layer=LAYER_AUDIOBLOCK, event=EVENT_DROP,
-                                            per=1.0  # Packet error rate = 1 for this frame
-                                        )
-                                    else:
-                                        # Normal processing
-                                        bitstream = vocoder_r2l.encode(pcm_processed)
-                                        pcm_processed = vocoder_r2l.decode(bitstream)
-                                        pcm_processed = vocoder_r2l.process_frame(pcm_processed)
-                                
-                                left.push_rx_block(pcm_processed, self.t_ms)  # type: ignore[attr-defined]
-                                
-                                # Metrics
-                                self.metrics.write_metric(
-                                    t_ms=self.t_ms, side="R", layer=LAYER_AUDIOBLOCK, event=EVENT_TX,
-                                    rtt_ms_est=float(rtt_est)
-                                )
-                                self.metrics.write_metric(
-                                    t_ms=self.t_ms, side="L", layer=LAYER_AUDIOBLOCK, event=EVENT_RX,
-                                    latency_ms=0.0  # Direct passthrough for now
-                                )
-                        except Exception as e:
-                            print(f"[ERROR] R->L audio: {e}", file=sys.stderr)
+                        self._process_audio_direction(
+                            src=right, dst=left,
+                            vocoder=vocoder_r2l,
+                            rtt_est=rtt_est,
+                            tx_side="R", rx_side="L",
+                            label="R->L",
+                            channel=channel,
+                        )
 
                 # (5) Goodput fenêtré (1 s)
                 if self.scenario.mode == "byte" and self.t_ms - window_start_ms >= 1000:
