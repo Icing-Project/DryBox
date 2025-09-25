@@ -432,8 +432,6 @@ class Runner:
         sar_active = mtu < sdu_max
         frag_l2r = SARFragmenter(mtu_bytes=mtu) if sar_active else None
         frag_r2l = SARFragmenter(mtu_bytes=mtu) if sar_active else None
-        reasm_l2r = SARReassembler() if sar_active else None
-        reasm_r2l = SARReassembler() if sar_active else None
 
         # 3) Channel setup (Mode B only)
         channel = None
@@ -461,8 +459,8 @@ class Runner:
         # 5) Réassemblage (timeout = 2×RTT_est ; RTT_est ~ 2×latency_ms si fourni)
         lat_ms = int(self.scenario.bearer.params.get("latency_ms", 60))
         rtt_est = max(1, 2 * lat_ms)
-        reas_l = SARReassembler(rtt_estimate_ms=2 * rtt_est, expect_header=sar_active)  # R->L
-        reas_r = SARReassembler(rtt_estimate_ms=2 * rtt_est, expect_header=sar_active)  # L->R
+        reasm_r2l = SARReassembler(rtt_estimate_ms=2 * rtt_est, expect_header=sar_active)  # R->L
+        reasm_l2r = SARReassembler(rtt_estimate_ms=2 * rtt_est, expect_header=sar_active)  # L->R
 
         # 6) Boucle
         duration = int(self.scenario.duration_ms)
