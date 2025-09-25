@@ -408,8 +408,6 @@ class Runner:
         sar_active = mtu < sdu_max
         frag_l2r = SARFragmenter(mtu_bytes=mtu) if sar_active else None
         frag_r2l = SARFragmenter(mtu_bytes=mtu) if sar_active else None
-        reasm_l2r = SARReassembler() if sar_active else None
-        reasm_r2l = SARReassembler() if sar_active else None
 
         # 3) Channel setup (Mode B only)
         channel = None
