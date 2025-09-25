@@ -14,6 +14,7 @@ import pathlib
 import random
 import sys
 from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
 try:
     import yaml  # PyYAML
@@ -75,6 +76,26 @@ try:
 except ImportError:
     create_vocoder = None
 
+@dataclass
+class AudioFlow:
+    src: Any
+    dst: Any
+    tx_side: str
+    rx_side: str
+    label: str
+    vocoder: Optional[Any] = None
+    channel: Optional[Any] = None
+
+@dataclass
+class ByteFlow:
+    bearer: DatagramBearer
+    frag: Optional[SARFragmenter]
+    reasm: Optional[SARReassembler]
+    src: Any
+    dst: Any
+    cap_side: str
+    metrics_side: str
+    side_label: str
 
 # --------- Contexte adaptateur ----------
 class AdapterCtx:
@@ -209,27 +230,31 @@ class Runner:
             print(f"[ERROR] {label}: {e}", file=sys.stderr)
             return None
 
-    def _apply_vocoder_and_loss(self, pcm_in, vocoder, rx_side):
+    def _apply_vocoder_and_loss(self, pcm_in, flow: AudioFlow):
         """
         Apply vocoder encode/decode/process and simulate packet loss per bearer loss_rate.
         Returns pcm_processed and optionally writes DROP metric if loss occurs.
         """
         pcm_processed = pcm_in
-        if vocoder is None:
+        if flow.vocoder is None:
             return pcm_processed
 
         loss_rate = self.scenario.bearer.params.get("loss_rate", 0.0)
         if self.rng.random() < loss_rate:
             # Frame lost - PLC
-            pcm_processed = vocoder.process_frame(None)
+            pcm_processed = flow.vocoder.process_frame(None)
             self.metrics.write_metric(
-                t_ms=self.t_ms, side=rx_side, layer=LAYER_AUDIOBLOCK, event=EVENT_DROP,
-                per=1.0
+                t_ms=self.t_ms,
+                side=flow.rx_side,
+                layer=LAYER_AUDIOBLOCK,
+                event=EVENT_DROP,
+                per=1.0,  # Packet error rate = 1 for this frame
             )
         else:
-            bitstream = vocoder.encode(pcm_processed)
-            pcm_processed = vocoder.decode(bitstream)
-            pcm_processed = vocoder.process_frame(pcm_processed)
+            bitstream = flow.vocoder.encode(pcm_processed)
+            pcm_processed = flow.vocoder.decode(bitstream)
+            pcm_processed = flow.vocoder.process_frame(pcm_processed)
+
         return pcm_processed
 
     def _write_audio_tx_rx_metrics(self, tx_side: str, rx_side: str, rtt_est: float):
@@ -243,74 +268,91 @@ class Runner:
             latency_ms=0.0
         )
 
-    def _process_audio_direction(self, src, dst, vocoder, rtt_est, tx_side: str, rx_side: str, label: str, channel=None):
-        """
-        Process one audio direction (src -> dst). Mirrors original behaviour exactly.
-        """
-        pcm = self._safe_call(f"{label} audio pull", src.pull_tx_block, self.t_ms)
+    def _process_audio_direction(self, flow: AudioFlow, rtt_est: float):
+        pcm = self._safe_call(f"{flow.label} audio pull", flow.src.pull_tx_block, self.t_ms)
         if not pcm or len(pcm) == 0:
             return
 
         pcm_processed = pcm
 
-        # Channel effects + SNR metric (if the channel supports it)
-        if channel is not None:
-            pcm_processed = channel.apply(pcm)
-            if hasattr(channel, "get_estimated_snr"):
-                snr_est = channel.get_estimated_snr(pcm, pcm_processed)
-                # Note: original wrote this with event=EVENT_RX and side swapped
+        # Apply channel
+        if flow.channel is not None:
+            pcm_processed = flow.channel.apply(pcm)
+            if hasattr(flow.channel, "get_estimated_snr"):
+                snr_est = flow.channel.get_estimated_snr(pcm, pcm_processed)
                 self.metrics.write_metric(
-                    t_ms=self.t_ms, side=rx_side, layer=LAYER_AUDIOBLOCK, event=EVENT_RX,
-                    snr_db_est=snr_est
+                    t_ms=self.t_ms, side=flow.rx_side,
+                    layer=LAYER_AUDIOBLOCK, event=EVENT_RX,
+                    snr_db_est=snr_est,
                 )
 
-        # Vocoder + packet loss simulation
-        pcm_processed = self._apply_vocoder_and_loss(pcm_processed, vocoder, rx_side)
+        # Apply vocoder + loss
+        pcm_processed = self._apply_vocoder_and_loss(pcm_processed, flow)
 
-        # Push to destination (preserves same type ignores)
-        self._safe_call(f"{label} audio push", dst.push_rx_block, pcm_processed, self.t_ms)
+        # Deliver
+        self._safe_call(f"{flow.label} audio push", flow.dst.push_rx_block, pcm_processed, self.t_ms)
 
-        # Metrics (tx/rx)
-        self._write_audio_tx_rx_metrics(tx_side, rx_side, rtt_est)
+        # Metrics
+        self._write_audio_tx_rx_metrics(flow.tx_side, flow.rx_side, rtt_est)
     
-    def _poll_and_send_bytemode(self, src, side_label: str, frag: Optional[SARFragmenter], bearer: DatagramBearer, cap_side: str, rtt_est, budget_per_tick):
+    def _poll_and_send_bytemode(self, flow: ByteFlow, rtt_est: float, budget_per_tick: int):
         """
-        Poll src.poll_link_tx, normalize sdus, fragment if needed and send via bearer.
-        cap_side used for capture/metrics (original code used L for left, R for right).
+        Poll flow.src.poll_link_tx, normalize SDUs, fragment if needed, and send via flow.bearer.
         """
-        res = self._safe_call(f"{side_label} poll_link_tx", src.poll_link_tx, budget_per_tick)
+        res = self._safe_call(f"{flow.side_label} poll_link_tx", flow.src.poll_link_tx, budget_per_tick)
         if not res:
             return
 
         try:
-            sdus: List[bytes] = [b if isinstance(b, (bytes, bytearray)) else b[0] for b in res]
+            sdus: List[bytes] = [
+                b if isinstance(b, (bytes, bytearray)) else b[0] for b in res
+            ]
         except Exception:
             sdus = []
 
         for sdu in sdus:
             payloads = [sdu]
-            if frag is not None:
-                payloads = frag.fragment(sdu)
+            if flow.frag is not None:
+                payloads = flow.frag.fragment(sdu)
             for p in payloads:
-                bearer.send(p, now_ms=self.t_ms)
-                self.cap.write(t_ms=self.t_ms, side=cap_side, layer=LAYER_BEARER, event=EVENT_TX, data=bytes(p))
+                flow.bearer.send(p, now_ms=self.t_ms)
+                self.cap.write(
+                    t_ms=self.t_ms,
+                    side=flow.cap_side,
+                    layer=LAYER_BEARER,
+                    event=EVENT_TX,
+                    data=bytes(p),
+                )
                 self.metrics.write_metric(
-                    t_ms=self.t_ms, side=cap_side, layer=LAYER_BEARER, event=EVENT_TX, rtt_ms_est=float(rtt_est)
+                    t_ms=self.t_ms,
+                    side=flow.cap_side,
+                    layer=LAYER_BEARER,
+                    event=EVENT_TX,
+                    rtt_ms_est=float(rtt_est),
                 )
         
-    def _deliver_bearer_to_adapter(self, dat, bearer, reassembler, dst_adapter, dst_side_for_metrics: str, src_side_for_cap: str):
-        self.cap.write(t_ms=self.t_ms, side=src_side_for_cap, layer=LAYER_BEARER, event=EVENT_RX, data=bytes(dat.payload))
+    def _deliver_bearer_to_adapter(self, dat, flow: ByteFlow):
+        """
+        Deliver a datagram from flow.bearer to flow.dst (via optional reassembly).
+        """
+        self.cap.write(
+            t_ms=self.t_ms,
+            side=flow.cap_side,
+            layer=LAYER_BEARER,
+            event=EVENT_RX,
+            data=bytes(dat.payload),
+        )
         lat = float(self.t_ms - dat.sent_ms)
         sdu: Optional[bytes] = dat.payload
-        if reassembler is not None:
-            sdu = reassembler.push_fragment(dat.payload, now_ms=self.t_ms)
-        if sdu is not None and hasattr(dst_adapter, "on_link_rx"):
-            dst_adapter.on_link_rx(sdu)
-            st = bearer.stats()
-            # identical metric writes as existing code
+        if flow.reasm is not None:
+            sdu = flow.reasm.push_fragment(dat.payload, now_ms=self.t_ms)
+
+        if sdu is not None and hasattr(flow.dst, "on_link_rx"):
+            flow.dst.on_link_rx(sdu)
+            st = flow.bearer.stats()
             self.metrics.write_metric(
                 t_ms=self.t_ms,
-                side=dst_side_for_metrics,
+                side=flow.metrics_side,
                 layer=LAYER_BYTELINK,
                 event=EVENT_RX,
                 latency_ms=lat,
@@ -318,7 +360,6 @@ class Runner:
                 loss_rate=st.loss_rate,
                 reorder_rate=st.reorder_rate,
             )
-
 
     # --------- Exécution ----------
     def run(self) -> int:
@@ -408,6 +449,52 @@ class Runner:
         bytes_rx_l = 0
         bytes_rx_r = 0
         window_start_ms = 0
+        
+        # --- Byte flows (mode A) ---
+        flows_byte = [
+            ByteFlow(
+                bearer=bearer_l2r,
+                frag=frag_l2r,
+                reasm=reasm_l2r,
+                src=left,
+                dst=right,
+                cap_side="L",
+                metrics_side="R",
+                side_label="LEFT",
+            ),
+            ByteFlow(
+                bearer=bearer_r2l,
+                frag=frag_r2l,
+                reasm=reasm_r2l,
+                src=right,
+                dst=left,
+                cap_side="R",
+                metrics_side="L",
+                side_label="RIGHT",
+            ),
+        ]
+
+        # --- Audio flows (mode B) ---
+        flows_audio = [
+            AudioFlow(
+                src=left,
+                dst=right,
+                tx_side="L",
+                rx_side="R",
+                label="L->R",
+                vocoder=vocoder_l2r,
+                channel=channel,
+            ),
+            AudioFlow(
+                src=right,
+                dst=left,
+                tx_side="R",
+                rx_side="L",
+                label="R->L",
+                vocoder=vocoder_r2l,
+                channel=channel,
+            ),
+        ]
 
         try:
             while self.t_ms <= duration:
@@ -416,64 +503,22 @@ class Runner:
                     if hasattr(a, "on_timer"):
                         a.on_timer(self.t_ms)  # type: ignore[attr-defined]
 
-                # (2) Mode-specific I/O
+                # (2) Mode-specific I/O et Livraison via bearer L->R R->L
                 if self.scenario.mode == "byte":
-                    # LEFT -> BEARER
-                    if hasattr(left, "poll_link_tx"):
-                        self._poll_and_send_bytemode(left, "LEFT", frag_l2r, bearer_l2r, "L", rtt_est, budget_per_tick)
-
-                    # RIGHT -> BEARER
-                    if hasattr(right, "poll_link_tx"):
-                        self._poll_and_send_bytemode(right, "RIGHT", frag_r2l, bearer_r2l, "R", rtt_est, budget_per_tick)
-
-
-                    # (3) Livraison via bearer L->R
-                    for dat in bearer_l2r.poll_deliver(self.t_ms):
-                        self._deliver_bearer_to_adapter(
-                            dat=dat,
-                            bearer=bearer_l2r,
-                            reassembler=reasm_l2r,
-                            dst_adapter=right,
-                            dst_side_for_metrics="R",
-                            src_side_for_cap="L",
-                        )
-
-                    # (4) Livraison via bearer R->L
-                    for dat in bearer_r2l.poll_deliver(self.t_ms):
-                        self._deliver_bearer_to_adapter(
-                            dat=dat,
-                            bearer=bearer_r2l,
-                            reassembler=reasm_r2l,
-                            dst_adapter=left,
-                            dst_side_for_metrics="L",
-                            src_side_for_cap="R",
-                        )
+                    # Mode A: ByteLink
+                    for flow in flows_byte:
+                        if hasattr(flow.src, "poll_link_tx"):
+                            self._poll_and_send_bytemode(flow, rtt_est, budget_per_tick)
+                        for dat in flow.bearer.poll_deliver(self.t_ms):
+                            self._deliver_bearer_to_adapter(dat, flow)
 
                 elif self.scenario.mode == "audio":
                     # Mode B: AudioBlock
                     if np is None:
                         raise SystemExit("Mode B (audio) requires numpy. Install with `pip install numpy`.")
-                    
-                    # Check if both adapters support AudioBlock
-                    if hasattr(left, "pull_tx_block") and hasattr(right, "push_rx_block"):
-                        self._process_audio_direction(
-                            src=left, dst=right,
-                            vocoder=vocoder_l2r,
-                            rtt_est=rtt_est,
-                            tx_side="L", rx_side="R",
-                            label="L->R",
-                            channel=channel,
-                        )
-                    
-                    if hasattr(right, "pull_tx_block") and hasattr(left, "push_rx_block"):
-                        self._process_audio_direction(
-                            src=right, dst=left,
-                            vocoder=vocoder_r2l,
-                            rtt_est=rtt_est,
-                            tx_side="R", rx_side="L",
-                            label="R->L",
-                            channel=channel,
-                        )
+                    for flow in flows_audio:
+                        if hasattr(flow.src, "pull_tx_block") and hasattr(flow.dst, "push_rx_block"):
+                            self._process_audio_direction(flow, rtt_est)
 
                 # (5) Goodput fenêtré (1 s)
                 if self.scenario.mode == "byte" and self.t_ms - window_start_ms >= 1000:
