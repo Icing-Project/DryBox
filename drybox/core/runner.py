@@ -56,25 +56,26 @@ from drybox.core.crypto_keys import resolve_keypairs, key_id
 
 # --------- Utils: chargement adaptateurs ----------
 def _load_class_from_path(spec: str):
-    """
-    Charge une classe à partir d'une spéc 'path/to/module.py:ClassName'.
-    Pas de cache global -> isolation simple entre runs.
-    """
-    if ":" not in spec:
-        raise ValueError(f"Adapter spec must be 'path.py:Class', got: {spec}")
-    path_str, class_name = spec.split(":", 1)
-    mod_path = pathlib.Path(path_str).resolve()
-    if not mod_path.exists():
-        raise FileNotFoundError(f"Adapter module not found: {mod_path}")
-    module_name = f"dbx_adapter_{mod_path.stem}_{abs(hash(mod_path))}"
-    spec_obj = importlib.util.spec_from_file_location(module_name, str(mod_path))
-    if spec_obj is None or spec_obj.loader is None:
-        raise ImportError(f"Cannot load module from: {mod_path}")
-    module = importlib.util.module_from_spec(spec_obj)
-    spec_obj.loader.exec_module(module)
-    cls = getattr(module, class_name, None)
-    if cls is None:
-        raise AttributeError(f"Class '{class_name}' not found in {mod_path}")
+    if ":" in spec:
+        path_str, class_name = spec.split(":", 1)
+    else:
+        # 👇 NEW: if no class is specified, assume "Adapter"
+        path_str, class_name = spec, "Adapter"
+
+    import importlib.util
+    import pathlib
+
+    path = pathlib.Path(path_str)
+    spec_module = importlib.util.spec_from_file_location(path.stem, path)
+    if spec_module is None:
+        raise ImportError(f"Cannot import from {path}")
+    module = importlib.util.module_from_spec(spec_module)
+    spec_module.loader.exec_module(module)  # type: ignore
+
+    try:
+        cls = getattr(module, class_name)
+    except AttributeError:
+        raise ImportError(f"Module {path} has no class {class_name}")
     return cls
 
 
