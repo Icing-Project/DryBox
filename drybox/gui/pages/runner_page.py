@@ -113,8 +113,10 @@ class RunnerPage(QWidget):
             self.append_log(f"Output directory: {output_dir}")
             self.append_log("-" * 60)
 
-            left_filename = left_adapter["adapter"]
-            right_filename = right_adapter["adapter"]
+            adapters_dir = os.path.join(os.path.dirname(__file__), "../../../adapters")
+            left_filename = os.path.join(adapters_dir, left_adapter["adapter"])
+            right_filename = os.path.join(adapters_dir, right_adapter["adapter"])
+
 
             # Launch thread
             self.runner_thread = RunnerThread(
