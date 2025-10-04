@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import pathlib
 import random
 import sys
@@ -47,6 +46,7 @@ EVENT_TICK = "tick"
 # --- Dépendances locales ---
 from drybox.core.metrics import MetricsWriter  # A1
 from drybox.core.capture import DbxCapWriter  # A1
+from drybox.core.adapter_registry import load_adapter_class
 from drybox.core.scenario import (  # A2
     ScenarioResolved,
 )
@@ -96,31 +96,6 @@ class ByteFlow:
     cap_side: str
     metrics_side: str
     side_label: str
-
-# --------- Utils: chargement adaptateurs ----------
-def _load_class_from_path(spec: str):
-    if ":" in spec:
-        path_str, class_name = spec.split(":", 1)
-    else:
-        # 👇 NEW: if no class is specified, assume "Adapter"
-        path_str, class_name = spec, "Adapter"
-
-    import importlib.util
-    import pathlib
-
-    path = pathlib.Path(path_str)
-    spec_module = importlib.util.spec_from_file_location(path.stem, path)
-    if spec_module is None:
-        raise ImportError(f"Cannot import from {path}")
-    module = importlib.util.module_from_spec(spec_module)
-    spec_module.loader.exec_module(module)  # type: ignore
-
-    try:
-        cls = getattr(module, class_name)
-    except AttributeError:
-        raise ImportError(f"Module {path} has no class {class_name}")
-    return cls
-
 
 # --------- Contexte adaptateur ----------
 class AdapterCtx:
@@ -181,7 +156,7 @@ class Runner:
 
     # --------- Chargement / lifecycle ----------
     def _load_adapter(self, spec: str, side: str, crypto_cfg: Dict[str, Any]):
-        cls = _load_class_from_path(spec)
+        cls = load_adapter_class(spec)
         inst = cls()
 
         # Découverte / capabilities (facultatif)
