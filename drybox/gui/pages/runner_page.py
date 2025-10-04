@@ -3,7 +3,9 @@ from PySide6.QtWidgets import (
     QLabel, QTextEdit, QProgressBar
 )
 from datetime import datetime
-import os, yaml
+from pathlib import Path
+import tempfile
+import yaml
 
 from drybox.gui.runner.runner_thread import RunnerThread
 
@@ -70,6 +72,7 @@ class RunnerPage(QWidget):
             # === Build schema-compliant scenario ===
             scenario_raw = self.general_page.to_dict()
             left_adapter, right_adapter = self.adapters_page.to_dict()
+            left_info, right_info = self.adapters_page.get_selected_adapter_infos()
 
             scenario = {
                 "mode": scenario_raw.get("mode", "audio"),
@@ -85,44 +88,44 @@ class RunnerPage(QWidget):
             # --- Filter out any unexpected top-level keys ---
             scenario = {k: v for k, v in scenario.items() if k in self.ALLOWED_KEYS}
 
-            # === Temp scenario file in drybox/scenarios ===
-            scenarios_dir = os.path.join(os.path.dirname(__file__), "../../scenarios")
-            os.makedirs(scenarios_dir, exist_ok=True)
-            tmp_file_path = os.path.join(
-                scenarios_dir, f"scenario_{datetime.now().strftime('%Y%m%d_%H%M%S')}.yaml"
-            )
-            with open(tmp_file_path, "w") as f:
-                yaml.dump(scenario, f, default_flow_style=False)
-            self.temp_scenario_file = tmp_file_path
-
-            # --- LOG THE GENERATED YAML ---
-            with open(tmp_file_path, "r") as f:
-                scenario_contents = f.read()
-            self.append_log("Generated scenario.yaml contents:\n" + scenario_contents)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
             # --- Output directory ---
-            output_dir = os.path.join(
-                os.path.dirname(__file__), "../../../runs",
-                f"gui_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            project_runs = Path(__file__).resolve().parents[3] / "runs"
+            output_dir_path = project_runs / f"gui_{timestamp}"
+            try:
+                output_dir_path.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                fallback_root = Path(tempfile.mkdtemp(prefix="drybox-run-"))
+                output_dir_path = fallback_root / f"gui_{timestamp}"
+                output_dir_path.mkdir(parents=True, exist_ok=True)
+                self.append_log(f"Runs directory fallback -> {output_dir_path}")
+
+            # === Scenario file alongside run artifacts ===
+            scenario_path = output_dir_path / "scenario.gui.yaml"
+            scenario_path.write_text(
+                yaml.safe_dump(scenario, sort_keys=False),
+                encoding="utf-8"
             )
-            os.makedirs(output_dir, exist_ok=True)
+            self.temp_scenario_file = str(scenario_path)
+
+            # --- LOG THE GENERATED YAML ---
+            scenario_contents = scenario_path.read_text(encoding="utf-8")
+            self.append_log("Generated scenario.yaml contents:\n" + scenario_contents)
+
+            output_dir = str(output_dir_path)
 
             self.append_log(f"Scenario file: {self.temp_scenario_file}")
-            self.append_log(f"Left adapter: {left_adapter}")
-            self.append_log(f"Right adapter: {right_adapter}")
+            self.append_log(f"Left adapter: {left_info.display_name} -> {left_info.spec}")
+            self.append_log(f"Right adapter: {right_info.display_name} -> {right_info.spec}")
             self.append_log(f"Output directory: {output_dir}")
             self.append_log("-" * 60)
-
-            adapters_dir = os.path.join(os.path.dirname(__file__), "../../../adapters")
-            left_filename = os.path.join(adapters_dir, left_adapter["adapter"])
-            right_filename = os.path.join(adapters_dir, right_adapter["adapter"])
-
 
             # Launch thread
             self.runner_thread = RunnerThread(
                 self.temp_scenario_file,
-                left_filename,
-                right_filename,
+                left_info.spec,
+                right_info.spec,
                 output_dir
             )
             self.runner_thread.log_signal.connect(self.append_log)
@@ -157,9 +160,5 @@ class RunnerPage(QWidget):
             self.append_log(f"✗ Scenario failed with exit code: {exit_code}")
             self.status_label.setText("Failed")
 
-        # Cleanup temp file
-        if self.temp_scenario_file and os.path.exists(self.temp_scenario_file):
-            try:
-                os.unlink(self.temp_scenario_file)
-            except Exception:
-                pass
+        # Keep generated scenario artifacts; we only need to drop the handle here
+        self.temp_scenario_file = None
