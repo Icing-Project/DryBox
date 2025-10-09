@@ -270,7 +270,7 @@ class Runner:
 
     def _process_audio_direction(self, flow: AudioFlow, rtt_est: float):
         pcm = self._safe_call(f"{flow.label} audio pull", flow.src.pull_tx_block, self.t_ms)
-        if not pcm or len(pcm) == 0:
+        if pcm is None or pcm.size == 0:
             return
 
         pcm_processed = pcm
