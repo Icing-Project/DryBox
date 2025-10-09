@@ -16,7 +16,7 @@ from drybox.core.adapter_registry import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 ADAPTERS_DIR = PROJECT_ROOT / "adapters"
-DEFAULT_IDENTIFIER = "nade_adapter.py"
+DEFAULT_IDENTIFIER = "nade-python"
 
 
 class AdaptersPage(QWidget):
@@ -109,14 +109,14 @@ class AdaptersPage(QWidget):
         modem_layout = QFormLayout(modem_box)
 
         vocoder_combo = QComboBox()
-        vocoder_combo.addItems(["none", "amr12k2_mock", "evs13k2_mock", "opus_nb_mock"])
+        vocoder_combo.addItems(["amr12k2_mock", "evs13k2_mock", "opus_nb_mock"])
         modem_layout.addRow("Vocoder:", vocoder_combo)
 
         vad_checkbox = QCheckBox("Enable VAD/DTX")
         modem_layout.addRow("", vad_checkbox)
 
         channel_combo = QComboBox()
-        channel_combo.addItems(["none", "awgn", "fading"])
+        channel_combo.addItems(["awgn", "fading"])
         modem_layout.addRow("Channel:", channel_combo)
 
         snr_spin = QSpinBox()
