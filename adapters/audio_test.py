@@ -5,7 +5,6 @@ import numpy as np
 from typing import Dict, Any
 import sys
 sys.path.insert(0, '.')
-from adapters.audioblock import AudioBlockAdapter
 
 ABI_VERSION = "1.0"
 
@@ -17,7 +16,7 @@ def nade_capabilities():
         "audioparams": {"sr": 8000, "block": 160},
     }
 
-class AudioTestAdapter(AudioBlockAdapter):
+class Adapter():
     """Test adapter that generates/receives sine waves"""
 
     def __init__(self):
