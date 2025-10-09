@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import pathlib
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 try:
     import yaml  # PyYAML
@@ -103,8 +103,8 @@ class ScenarioResolved:
         out.setdefault("cfo_hz", 0)
         out.setdefault("ppm", 0)
         out.setdefault("network", {"bearer": "volte_evs"})
-        out.setdefault("left", {"adapter": "nade_adapter.py", "gain": 1.0})
-        out.setdefault("right", {"adapter": "nade_adapter.py", "gain": 1.0})
+        out.setdefault("left", {"adapter": "nade-python", "gain": 1.0})
+        out.setdefault("right", {"adapter": "nade-python", "gain": 1.0})
         return out
 
     # ---------- Loading & validation ----------
