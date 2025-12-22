@@ -20,11 +20,11 @@ class ConcreteAudioAdapter(AudioBlockAdapter):
     def on_timer(self, t_ms: int) -> None:
         self.timer_calls += 1
 
-    def pull_tx_block(self, t_ms: int) -> np.ndarray:
+    def push_tx_block(self, t_ms: int) -> np.ndarray:
         self.tx_calls += 1
         return np.ones(self.BLOCK_SAMPLES, dtype=np.int16) * 100
 
-    def push_rx_block(self, pcm: np.ndarray, t_ms: int) -> None:
+    def pull_rx_block(self, pcm: np.ndarray, t_ms: int) -> None:
         self.rx_blocks.append((t_ms, pcm.copy()))
 
 
@@ -85,13 +85,13 @@ class TestAudioBlockAdapter:
         adapter.on_timer(100)
         assert adapter.timer_calls == 1
 
-        tx_block = adapter.pull_tx_block(100)
+        tx_block = adapter.push_tx_block(100)
         assert len(tx_block) == 160
         assert tx_block.dtype == np.int16
         assert adapter.tx_calls == 1
 
         rx_block = np.ones(160, dtype=np.int16) * 200
-        adapter.push_rx_block(rx_block, 120)
+        adapter.pull_rx_block(rx_block, 120)
         assert len(adapter.rx_blocks) == 1
         assert adapter.rx_blocks[0][0] == 120
 
