@@ -36,7 +36,7 @@ class Adapter():
         """Update phase tracking"""
         pass
 
-    def pull_tx_block(self, t_ms: int) -> np.ndarray:
+    def push_tx_block(self, t_ms: int) -> np.ndarray:
         """Generate sine wave PCM block"""
         # Time array for this block
         t = (np.arange(self.BLOCK_SAMPLES, dtype=np.float32) + self.phase) / self.SAMPLE_RATE
@@ -49,7 +49,7 @@ class Adapter():
         pcm = (x * 32767).astype(np.int16, copy=False)
         return pcm
 
-    def push_rx_block(self, pcm: np.ndarray, t_ms: int) -> None:
+    def pull_rx_block(self, pcm: np.ndarray, t_ms: int) -> None:
         """Receive PCM block"""
         self.rx_buffer.append((t_ms, pcm.copy()))
 

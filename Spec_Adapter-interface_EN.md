@@ -14,7 +14,7 @@
   2. **I/O by mode**:
 
      * **Mode A** (ByteLink): `poll_link_tx(budget)` (left → enqueue to bearer) then (right → enqueue); the bearer delivers the PDUs **that arrive** at this tick, DryBox calls `on_link_rx(...)` on the destination peer **in arrival order** (reordering may occur depending on the bearer).
-     * **Mode B** (AudioBlock): `pull_tx_block()` (left & right), pass through **channel/vocoder/PLC**, then deliver via `push_rx_block()` to the peer.
+     * **Mode B** (AudioBlock): `push_tx_block()` (left & right), pass through **channel/vocoder/PLC**, then deliver via `pull_rx_block()` to the peer.
   3. Emit per-tick **metrics**.
 * `t_ms` is **monotonic**, decoupled from the system clock; **no sleep** is expected on the adapter side (**deterministic**).
 
@@ -105,18 +105,18 @@ class NadeByteLink:
 ```python
 class NadeAudioPort:
     # v1 default: 8 kHz, 20 ms, mono PCM int16 LE
-    def pull_tx_block(self) -> "np.ndarray[int16] | None": ...
-    def push_rx_block(self, block: "np.ndarray[int16]") -> None: ...
+    def push_tx_block(self) -> "np.ndarray[int16] | None": ...
+    def pull_rx_block(self, block: "np.ndarray[int16]") -> None: ...
     def on_timer(self, t_ms: int) -> None: ...
 ```
 
-**Requirements for `pull_tx_block`:**
+**Requirements for `push_tx_block`:**
 
 * Always return a **C-contiguous** `np.ndarray`, dtype **int16**, **mono**, **LE**, length **BLOCK\_SAMPLES** (default 160 @ 8 kHz → 20 ms).
 * If silence: return a **zero buffer** (avoid `None`).
 * **Never** block.
 
-**Requirements for `push_rx_block`:**
+**Requirements for `pull_rx_block`:**
 
 * Reception **after** channel/vocoder/PLC.
 * Buffer **C-contiguous int16**, same shape as TX.
@@ -173,8 +173,8 @@ class NadeAudioPort:
    │     bearer L→R deliver? → R.on_link_rx(SDU*)
    │     bearer R→L deliver? → L.on_link_rx(SDU*)
    └─ if Mode B:
-         L.pull_tx_block() → vocoder/channel → R.push_rx_block()
-         R.pull_tx_block() → vocoder/channel → L.push_rx_block()
+         L.push_tx_block() → vocoder/channel → R.pull_rx_block()
+         R.push_tx_block() → vocoder/channel → L.pull_rx_block()
 ```
 
 \* SDUs **already reassembled** if SAR is active.
@@ -208,7 +208,7 @@ class NadeAudioPort:
 | Adapter-side situation            | Expected behavior                                  |
 | --------------------------------- | -------------------------------------------------- |
 | No data to send (Mode A)          | `poll_link_tx` → `[]` immediately                  |
-| Silence (Mode B)                  | `pull_tx_block` → zero buffer of the expected size |
+| Silence (Mode B)                  | `push_tx_block` → zero buffer of the expected size |
 | Invalid data (type, dtype, shape) | **Raise** a clear exception → DryBox `exit 3`      |
 | Long blocking                     | **Forbidden** (impacts the entire run)             |
 | Over-production vs `budget`       | **Do not exceed**; **buffer** reasonably or drop   |
@@ -248,13 +248,13 @@ class Adapter:
     def __init__(self, cfg): self.ph = 0.0; self.hz = 1000.0 if cfg["side"]=="left" else 800.0
     def start(self, ctx): self.ctx = ctx
     def on_timer(self, t_ms): pass
-    def pull_tx_block(self):
+    def push_tx_block(self):
         # Generate a sine (mono, int16, C-contiguous), 20 ms @ 8 kHz
         t = (np.arange(self.N, dtype=np.float32) + self.ph) / self.SR
         self.ph += self.N
         x = 0.2*np.sin(2*np.pi*self.hz*t)
         return (x*32767).astype(np.int16, copy=False)
-    def push_rx_block(self, block: np.ndarray): pass
+    def pull_rx_block(self, block: np.ndarray): pass
 ```
 
 ---
@@ -271,8 +271,8 @@ class Adapter:
 
 * **Mode B**:
 
-  * `pull_tx_block()`: `dtype=int16`, `ndim==1`, `C-contiguous`, **correct length**.
-  * `push_rx_block()` accepts the same constraints.
+  * `push_tx_block()`: `dtype=int16`, `ndim==1`, `C-contiguous`, **correct length**.
+  * `pull_rx_block()` accepts the same constraints.
 
 * **Timing**: no method **blocks** (> a few hundred µs).
 
@@ -302,7 +302,7 @@ class Adapter:
 ### TL;DR
 
 * **Mode A**: `on_link_rx(bytes)`, `poll_link_tx(budget)->list[bytes]`, `on_timer(t_ms)`.
-* **Mode B**: `pull_tx_block()->np.int16[C]`, `push_rx_block(np.int16[C])`, `on_timer(t_ms)`.
+* **Mode B**: `push_tx_block()->np.int16[C]`, `pull_rx_block(np.int16[C])`, `on_timer(t_ms)`.
 * **PCM**: int16 LE, mono, **20 ms @ 8 kHz** (default).
 * **SAR-lite**: 3-byte header `frag_id|idx|last`, timeout `2×RTT_est`.
 * **Discovery**: `nade_capabilities()` with `"abi_version": "1.0"`.
