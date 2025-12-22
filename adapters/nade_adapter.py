@@ -94,7 +94,7 @@ class Adapter:
             fn(sdu, t_ms)
 
     # Audio mode passthroughs (DryBox will call these when in block mode)
-    def pull_tx_block(self, t_ms: int):
+    def push_tx_block(self, t_ms: int):
         if self.nade is None:
             # return silence by default (160 samples @ 8kHz)
             try:
@@ -102,17 +102,17 @@ class Adapter:
                 return _np.zeros(160, dtype=_np.int16)
             except Exception:
                 return None
-        fn = getattr(self.nade, "pull_tx_block", None)
+        fn = getattr(self.nade, "push_tx_block", None)
         if fn is None:
             # Not an audio mode endpoint — return silence
             import numpy as _np
             return _np.zeros(160, dtype=_np.int16)
         return fn(t_ms)
 
-    def push_rx_block(self, pcm: "np.ndarray[int16]", t_ms: int):
+    def pull_rx_block(self, pcm: "np.ndarray[int16]", t_ms: int):
         if self.nade is None:
             return
-        fn = getattr(self.nade, "push_rx_block", None)
+        fn = getattr(self.nade, "pull_rx_block", None)
         if fn is None:
             return
         return fn(pcm, t_ms)
