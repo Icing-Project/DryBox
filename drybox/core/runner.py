@@ -269,7 +269,7 @@ class Runner:
         )
 
     def _process_audio_direction(self, flow: AudioFlow, rtt_est: float):
-        pcm = self._safe_call(f"{flow.label} audio pull", flow.src.pull_tx_block, self.t_ms)
+        pcm = self._safe_call(f"{flow.label} audio push", flow.src.push_tx_block, self.t_ms)
         if pcm is None or pcm.size == 0:
             return
 
@@ -290,7 +290,7 @@ class Runner:
         pcm_processed = self._apply_vocoder_and_loss(pcm_processed, flow)
 
         # Deliver
-        self._safe_call(f"{flow.label} audio push", flow.dst.push_rx_block, pcm_processed, self.t_ms)
+        self._safe_call(f"{flow.label} audio pull", flow.dst.pull_rx_block, pcm_processed, self.t_ms)
 
         # Metrics
         self._write_audio_tx_rx_metrics(flow.tx_side, flow.rx_side, rtt_est)
@@ -537,7 +537,7 @@ class Runner:
                     if np is None:
                         raise SystemExit("Mode B (audio) requires numpy. Install with `pip install numpy`.")
                     for flow in flows_audio:
-                        if hasattr(flow.src, "pull_tx_block") and hasattr(flow.dst, "push_rx_block"):
+                        if hasattr(flow.src, "push_tx_block") and hasattr(flow.dst, "pull_rx_block"):
                             self._process_audio_direction(flow, rtt_est)
 
                 # (5) Goodput fenêtré (1 s)
