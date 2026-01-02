@@ -29,7 +29,7 @@ except ImportError:
     np = None  # Mode B will require numpy
 
 # --- Constantes / Defaults (brief v1) ---
-DEFAULT_TICK_MS = 10
+DEFAULT_TICK_MS = 1
 DEFAULT_SEED = 0
 DEFAULT_SDU_MAX = 1024  # avant fragmentation SAR
 DEFAULT_MODE = "audio"  # défaut global v1 (Mode B), ByteLink reste supporté

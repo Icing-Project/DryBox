@@ -35,7 +35,7 @@ class GeneralPage(QWidget):
         self.duration_spin = QSpinBox()
         self.duration_spin.setRange(0, 50000)
         self.duration_spin.setSingleStep(100)
-        self.duration_spin.setValue(5000)
+        self.duration_spin.setValue(1000)
         basic_layout.addRow("Duration (ms):", self.duration_spin)
 
         # Seed
@@ -125,7 +125,7 @@ class GeneralPage(QWidget):
         mode = scenario.get("mode", "audio")
         self.mode_byte.setChecked(mode.lower().startswith("byte"))
         self.mode_audio.setChecked(not mode.lower().startswith("byte"))
-        self.duration_spin.setValue(scenario.get("duration_ms", 5000))
+        self.duration_spin.setValue(scenario.get("duration_ms", 1000))
         self.seed_spin.setValue(scenario.get("seed", random.randint(0, 999999)))
 
         network = scenario.get("network", {})
