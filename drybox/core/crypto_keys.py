@@ -9,18 +9,14 @@ import hmac
 import os
 from typing import Any, Dict, Optional, Tuple
 
-# --- Ed25519 backend (cryptography ou pynacl) ---
-_ED25519_BACKEND = None
+# --- X25519 backend (cryptography) ---
+_X25519_BACKEND = None
 try:
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.asymmetric import x25519
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-    _ED25519_BACKEND = "cryptography"
+    _X25519_BACKEND = "cryptography"
 except Exception:  # pragma: no cover
-    try:
-        from nacl.signing import SigningKey  # type: ignore
-        _ED25519_BACKEND = "pynacl"
-    except Exception:
-        _ED25519_BACKEND = None
+    _X25519_BACKEND = None
 
 
 def _hkdf_sha256(ikm: bytes, salt: bytes, info: bytes, length: int) -> bytes:
@@ -77,31 +73,34 @@ def _parse_priv_any(v: Any) -> Optional[bytes]:
     else:
         raise SystemExit(4)
 
-    # Normalise à seed 32 octets (Ed25519)
+    # X25519 private keys are exactly 32 bytes
     if len(b) == 32:
         return b
     if len(b) == 64:
-        # Tolérer 64 (clé étendue) → on garde les 32 premiers octets (seed)
+        # If 64 bytes provided, take first 32 (similar to Ed25519 seed handling)
         return b[:32]
     raise SystemExit(4)
 
 
 def _pub_from_priv_seed(priv32: bytes) -> bytes:
-    if _ED25519_BACKEND == "cryptography":
-        sk = Ed25519PrivateKey.from_private_bytes(priv32)
-        pk = sk.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    """Derive X25519 public key from 32-byte private key"""
+    if _X25519_BACKEND == "cryptography":
+        # Create X25519 private key from bytes
+        sk = x25519.X25519PrivateKey.from_private_bytes(priv32)
+        # Derive public key
+        pk = sk.public_key().public_bytes(
+            encoding=Encoding.Raw,
+            format=PublicFormat.Raw
+        )
         return pk
-    if _ED25519_BACKEND == "pynacl":  # pragma: no cover
-        sk = SigningKey(priv32)
-        return bytes(sk.verify_key)
     raise RuntimeError(
-        "No Ed25519 backend available. Install 'cryptography' (recommended) or 'pynacl'."
+        "No X25519 backend available. Install 'cryptography' package."
     )
 
 
 def derive_priv_seed(*, seed: int, left_spec: str, right_spec: str, side: str) -> bytes:
     """
-    Dérive une seed Ed25519 (32B) déterministe à partir du seed scénario et des specs d'adapters.
+    Dérive une seed X25519 (32B) déterministe à partir du seed scénario et des specs d'adapters.
     - Stable pour un given (seed, left_spec, right_spec, side)
     - Indépendant des paramètres de sweep (ex: snr_db)
     """
@@ -109,7 +108,8 @@ def derive_priv_seed(*, seed: int, left_spec: str, right_spec: str, side: str) -
     a = left_spec.encode("utf-8")
     b = right_spec.encode("utf-8")
     aa, bb = (a, b) if a <= b else (b, a)
-    salt = hashlib.sha256(b"DryBox.Ed25519.v1|" + aa + b"|" + bb).digest()
+    # Updated salt to reflect X25519 usage
+    salt = hashlib.sha256(b"DryBox.X25519.v1|" + aa + b"|" + bb).digest()
     info = f"side:{side}".encode("utf-8")
     return _hkdf_sha256(ikm, salt, info, 32)
 
