@@ -8,6 +8,7 @@ import tempfile
 import yaml
 
 from drybox.gui.runner.runner_thread import RunnerThread
+from drybox.gui.widgets.metrics_graphs import CombinedMetricsGraph, DualDirectionMetricsGraph
 
 
 class RunnerPage(QWidget):
@@ -29,12 +30,23 @@ class RunnerPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        # --- Graph placeholders ---
+        # --- Real-time Metrics Graphs ---
         graphs_layout = QHBoxLayout()
-        graph_left = QGroupBox("Graph Left (placeholder)")
-        graph_right = QGroupBox("Graph Right (placeholder)")
-        graphs_layout.addWidget(graph_left)
-        graphs_layout.addWidget(graph_right)
+
+        # Left panel: Loss/Reorder rates and Jitter
+        left_graph_box = QGroupBox("Network Quality")
+        left_graph_layout = QVBoxLayout(left_graph_box)
+        self.left_metrics_graph = CombinedMetricsGraph()
+        left_graph_layout.addWidget(self.left_metrics_graph)
+        graphs_layout.addWidget(left_graph_box)
+
+        # Right panel: Both directions comparison
+        right_graph_box = QGroupBox("Direction Comparison (L→R vs R→L)")
+        right_graph_layout = QVBoxLayout(right_graph_box)
+        self.right_metrics_graph = DualDirectionMetricsGraph()
+        right_graph_layout.addWidget(self.right_metrics_graph)
+        graphs_layout.addWidget(right_graph_box)
+
         layout.addLayout(graphs_layout)
 
         # --- Status label ---
@@ -67,6 +79,10 @@ class RunnerPage(QWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         self.status_label.setText("Starting...")
+
+        # Clear previous graph data
+        self.left_metrics_graph.clear_data()
+        self.right_metrics_graph.clear_data()
 
         try:
             # === Build schema-compliant scenario ===
@@ -132,6 +148,7 @@ class RunnerPage(QWidget):
             self.runner_thread.status_signal.connect(lambda s: self.status_label.setText(s))
             self.runner_thread.progress_signal.connect(self.progress_bar.setValue)
             self.runner_thread.finished_signal.connect(self.on_run_finished)
+            self.runner_thread.metrics_signal.connect(self._on_metrics_update)
             self.runner_thread.start()
 
         except Exception as e:
@@ -162,3 +179,8 @@ class RunnerPage(QWidget):
 
         # Keep generated scenario artifacts; we only need to drop the handle here
         self.temp_scenario_file = None
+
+    def _on_metrics_update(self, metrics: dict):
+        """Handle real-time metrics updates from runner."""
+        self.left_metrics_graph.update_metrics(metrics)
+        self.right_metrics_graph.update_metrics(metrics)

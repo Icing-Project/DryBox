@@ -12,6 +12,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "dissononce>=0.34.3",
     "cffi>=1.17.0",
+    "pyqtgraph>=0.13.0",
 ]
 
 [dependency-groups]
