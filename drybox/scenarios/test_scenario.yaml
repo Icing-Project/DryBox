@@ -1,0 +1,32 @@
+mode: audio
+duration_ms: 5000
+seed: 998562
+network:
+  bearer: volte_evs
+  loss_rate: 0.0
+  latency_ms: 20
+  jitter_ms: 5
+  reorder_rate: 0.0
+  ge_p_good_bad: 0.001
+  ge_p_bad_good: 0.1
+  mtu_bytes: 1500
+left:
+  adapter: nade_adapter.py
+  gain: 1.7
+  modem:
+    vocoder: none
+    vad_dtx: false
+    channel_type: none
+    snr_db: 20
+    doppler_hz: 50
+    num_paths: 8
+right:
+  adapter: nade_adapter.py
+  gain: 1.0
+  modem:
+    vocoder: none
+    vad_dtx: false
+    channel_type: none
+    snr_db: 20
+    doppler_hz: 50
+    num_paths: 8

@@ -1,0 +1,9 @@
+*/__pycache__
+__pycache__
+drybox.egg-info
+.venv
+.idea
+.code
+.vscode
+.claude
+runs/*

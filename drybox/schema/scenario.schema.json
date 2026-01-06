@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://icing.dev/drybox/schema/scenario-v2.schema.json",
+  "title": "DryBox v2 Scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mode": { "type": "string", "enum": ["audio", "byte"], "default": "audio" },
+    "duration_ms": { "type": "integer", "minimum": 1, "default": 5000 },
+    "seed": { "type": "integer", "default": 123456 },
+
+    "network": {
+      "type": "object",
+      "properties": {
+        "bearer": { "type": "string", "enum": ["volte_evs", "cs_gsm", "pstn_g711", "ott_udp"], "default": "volte_evs" },
+        "latency_ms": { "type": "integer", "minimum": 0, "default": 20 },
+        "jitter_ms": { "type": "integer", "minimum": 0, "default": 5 },
+        "loss_rate": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "reorder_rate": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "ge_p_good_bad": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.001 },
+        "ge_p_bad_good": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.1 },
+        "mtu_bytes": { "type": "integer", "minimum": 16, "default": 1500 }
+      },
+      "required": ["bearer"],
+      "additionalProperties": false
+    },
+
+    "left": { "$ref": "#/$defs/adapter" },
+    "right": { "$ref": "#/$defs/adapter" },
+
+    "crypto": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "left_priv": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object", "properties": { "hex": { "type": "string" } }, "required": ["hex"] },
+            { "type": "object", "properties": { "b64": { "type": "string" } }, "required": ["b64"] },
+            { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] }
+          ]
+        },
+        "right_priv": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object", "properties": { "hex": { "type": "string" } }, "required": ["hex"] },
+            { "type": "object", "properties": { "b64": { "type": "string" } }, "required": ["b64"] },
+            { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] }
+          ]
+        }
+      }
+    },
+
+    "cfo_hz": { "type": "integer", "default": 0 },
+    "ppm": { "type": "integer", "default": 0 }
+  },
+
+  "$defs": {
+    "adapter": {
+      "type": "object",
+      "required": ["adapter", "gain"],
+      "properties": {
+        "adapter": { "type": "string", "default": "nade_adapter.py" },
+        "gain": { "type": "number", "minimum": 0, "default": 1.0 },
+        "modem": {
+          "type": "object",
+          "properties": {
+            "vocoder": { "type": "string", "enum": ["none", "evs13k2_mock", "amr12k2_mock", "opus_nb_mock"], "default": "none" },
+            "vad_dtx": { "type": "boolean", "default": false },
+            "channel_type": { "type": "string", "enum": ["none", "awgn", "fading"], "default": "none" },
+            "snr_db": { "type": "integer", "minimum": 0, "default": 20 },
+            "doppler_hz": { "type": "integer", "minimum": 0, "default": 50 },
+            "num_paths": { "type": "integer", "minimum": 1, "default": 8 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

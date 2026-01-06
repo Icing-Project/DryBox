@@ -1,4 +1,4 @@
-# DryBox × Nade — Architecture and Implementation Guide (DBX‑ABI v1)
+  # DryBox × Nade — Architecture and Implementation Guide (DBX‑ABI v1)
 
 > **Version**: 1.0 (beta)\
 > **Audience**: Icing team (protocol, radio/DSP, networking, app), new contributors\
@@ -101,13 +101,13 @@ class NadeAudioPort:
     SAMPLE_RATE = 8000
     BLOCK_SAMPLES = 160  # 20 ms
 
-    def pull_tx_block(self, t_ms: int) -> 'np.ndarray[int16]': ...
-    def push_rx_block(self, pcm: 'np.ndarray[int16]', t_ms: int) -> None: ...
+    def push_tx_block(self, t_ms: int) -> 'np.ndarray[int16]': ...
+    def pull_rx_block(self, pcm: 'np.ndarray[int16]', t_ms: int) -> None: ...
     def on_timer(self, t_ms: int) -> None: ...
 ```
 
-- `pull_tx_block`: DryBox fetches the PCM block to transmit.
-- `push_rx_block`: DryBox delivers the received block (post channel/vocoder).
+- `push_tx_block`: DryBox fetches the PCM block to transmit.
+- `pull_rx_block`: DryBox delivers the received block (post channel/vocoder).
 - `on_timer`: internal cadence/coherence (AGC, modem reconfig…).
 
 **Use when**: DSP work, data‑over‑voice validation, FEC/interleave tuning, BER‑SNR curves, codec compatibility.
@@ -157,7 +157,7 @@ bearer:
   reorder: 0.01
   mtu: 64                # Mode A
 channel:                  # Mode B
-  type: awgn | fading
+  type: awgn | rayleigh
   snr_db: 12
 vocoder:                  # Mode B (mock)
   type: amr12k2_mock
@@ -286,13 +286,13 @@ class NadeByteLink:
 class NadeAudioPort:
     SAMPLE_RATE: int
     BLOCK_SAMPLES: int
-    def pull_tx_block(self, t_ms: int) -> 'np.ndarray[int16]': ...
-    def push_rx_block(self, pcm: 'np.ndarray[int16]', t_ms: int) -> None: ...
+    def push_tx_block(self, t_ms: int) -> 'np.ndarray[int16]': ...
+    def pull_rx_block(self, pcm: 'np.ndarray[int16]', t_ms: int) -> None: ...
     def on_timer(self, t_ms: int) -> None: ...
 ```
 
 **DryBox guarantees**: regular cadence of `BLOCK_SAMPLES` per `t_ms` (e.g., 20 ms).\
-**DryBox expects**: `pull_tx_block` always returns a full buffer (zero‑pad for silence if needed).
+**DryBox expects**: `push_tx_block` always returns a full buffer (zero‑pad for silence if needed).
 
 ### 11.4. Threading & timing
 
