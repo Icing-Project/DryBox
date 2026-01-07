@@ -132,7 +132,7 @@ def nade_capabilities() -> dict:
 
 ## 5) Runner & execution
 
-- **Simulated clock** (`t_ms`): loop in steps (default 10 ms).
+- **Simulated clock** (`t_ms`): loop in steps (default 1 ms).
 - **Two endpoints** loaded via adapters (Python module, sidecar binary, or FFI lib).
 - **Bearers**: inject latency, jitter, loss, reorder, MTU; or audio+vocoder chain (Mode B).
 - **SAR‑lite** (Mode A, optional): 3‑byte header `frag_id | idx | last`.
