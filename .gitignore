@@ -1,5 +1,6 @@
-*/__pycache__
 __pycache__
+*/__pycache__
+drybox/core/__pycache__
 drybox.egg-info
 .venv
 .idea
