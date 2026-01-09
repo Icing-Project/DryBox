@@ -13,9 +13,8 @@ from drybox.core.adapter_registry import (
     discover_adapters,
     resolve_identifier,
 )
+from drybox.core.paths import ADAPTERS_DIR
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-ADAPTERS_DIR = PROJECT_ROOT / "adapters"
 DEFAULT_IDENTIFIER = "nade-python"
 
 
