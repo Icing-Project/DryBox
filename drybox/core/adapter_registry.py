@@ -7,8 +7,7 @@ from importlib import import_module, metadata, util as importlib_util
 from pathlib import Path
 from typing import Dict, Iterable, List, Literal, Optional
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_ADAPTERS_DIR = PROJECT_ROOT / "adapters"
+from drybox.core.paths import PROJECT_ROOT, ADAPTERS_DIR as DEFAULT_ADAPTERS_DIR, normalize_path
 ENTRYPOINT_GROUP = "drybox.adapters"
 ENTRYPOINT_PREFIXES = ("entrypoint:", "pkg:")
 
@@ -103,14 +102,14 @@ def _normalize_path_candidate(path_str: str, adapters_dir: Optional[Path]) -> Op
 
     candidate = Path(path_str)
     if candidate.is_file():
-        return candidate.resolve()
+        return normalize_path(candidate.resolve())
 
     # Treat bare filenames as residing in adapters_dir
     if adapters_dir is None:
         adapters_dir = DEFAULT_ADAPTERS_DIR
     candidate = adapters_dir / path_str
     if candidate.is_file():
-        return candidate.resolve()
+        return normalize_path(candidate.resolve())
 
     return None
 
