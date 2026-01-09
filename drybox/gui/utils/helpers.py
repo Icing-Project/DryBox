@@ -2,9 +2,7 @@ from pathlib import Path
 import yaml
 from typing import Tuple
 
-# --- Directories ---
-SCENARIOS_DIR = Path(__file__).resolve().parent.parent.parent / "scenarios"
-SCENARIOS_DIR.mkdir(exist_ok=True)
+from drybox.core.paths import SCENARIOS_DIR
 
 # === Scenario helpers ===
 
