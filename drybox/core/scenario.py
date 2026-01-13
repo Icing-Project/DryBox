@@ -98,7 +98,7 @@ class ScenarioResolved:
     def _apply_defaults(doc: Dict[str, Any]) -> Dict[str, Any]:
         out = dict(doc) if doc else {}
         out.setdefault("mode", "audio")
-        out.setdefault("duration_ms", 1000)
+        out.setdefault("duration_ms", 2000)
         out.setdefault("seed", 123456)
         out.setdefault("cfo_hz", 0)
         out.setdefault("ppm", 0)
