@@ -397,6 +397,10 @@ class Runner:
         left, left_caps = self._load_adapter(self.left_adapter_spec, "L", l_crypto)
         right, right_caps = self._load_adapter(self.right_adapter_spec, "R", r_crypto)
         self._require_mode_supported(left_caps, right_caps)
+        
+        # Adapters state
+        handshake_done = False
+        messages_sent = False
 
         # 1) Configure bearer (translate 'network' => bearer type + params)
         # Schema: network: { bearer: "volte_evs", latency_ms: 20, ... }
@@ -539,6 +543,20 @@ class Runner:
                     for flow in flows_audio:
                         if hasattr(flow.src, "push_tx_block") and hasattr(flow.dst, "pull_rx_block"):
                             self._process_audio_direction(flow, rtt_est)
+                        if not handshake_done:
+                            l_ready = left.is_handshake_complete() if hasattr(left, 'is_handshake_complete') else True
+                            r_ready = right.is_handshake_complete() if hasattr(right, 'is_handshake_complete') else True
+                            
+                            if l_ready and r_ready:
+                                handshake_done = True
+                        
+                        if handshake_done and not messages_sent and self.t_ms >= 1000:  # 1s grace period
+                            
+                            if hasattr(left, 'send_sdu'):
+                                left.send_sdu(b"Hello from L")
+                            if hasattr(right, 'send_sdu'):
+                                right.send_sdu(b"Hello from R")
+                            messages_sent = True
 
                 # (5) Goodput fenêtré (1 s)
                 if self.scenario.mode == "byte" and self.t_ms - window_start_ms >= 1000:
