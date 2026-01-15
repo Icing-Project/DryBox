@@ -31,13 +31,22 @@ class RunnerThread(QThread):
     def _parse_metrics_line(self, line: str) -> dict | None:
         """Parse metrics from runner output line.
 
-        Expected format: [  1000 ms] L->R loss=0.000 reord=0.000 jitter=0.0ms | R->L loss=0.000 reord=0.000 jitter=0.0ms
+        Byte mode format:
+        [  1000 ms] L->R loss=0.000 reord=0.000 jitter=0.0ms | R->L loss=0.000 reord=0.000 jitter=0.0ms | rtt=120ms gp_l=1000bps gp_r=1000bps
+
+        Audio mode format:
+        [  1000 ms] Mode B Audio | snr=20.0dB ber=0.0010 per=0.050 frames=50 lost=2
         """
-        # Pattern for byte mode metrics
-        byte_pattern = r'\[\s*(\d+)\s*ms\]\s*L->R\s+loss=([\d.]+)\s+reord=([\d.]+)\s+jitter=([\d.]+)ms\s*\|\s*R->L\s+loss=([\d.]+)\s+reord=([\d.]+)\s+jitter=([\d.]+)ms'
+        # Pattern for byte mode metrics (extended with RTT and goodput)
+        byte_pattern = (
+            r'\[\s*(\d+)\s*ms\]\s*'
+            r'L->R\s+loss=([\d.]+)\s+reord=([\d.]+)\s+jitter=([\d.]+)ms\s*\|\s*'
+            r'R->L\s+loss=([\d.]+)\s+reord=([\d.]+)\s+jitter=([\d.]+)ms'
+            r'(?:\s*\|\s*rtt=([\d.]+)ms\s+gp_l=([\d.]+)bps\s+gp_r=([\d.]+)bps)?'
+        )
         match = re.search(byte_pattern, line)
         if match:
-            return {
+            result = {
                 't_ms': int(match.group(1)),
                 'mode': 'byte',
                 'l2r_loss': float(match.group(2)),
@@ -47,15 +56,44 @@ class RunnerThread(QThread):
                 'r2l_reorder': float(match.group(6)),
                 'r2l_jitter': float(match.group(7)),
             }
+            # Add optional extended metrics if present
+            if match.group(8):
+                result['rtt_ms'] = float(match.group(8))
+            if match.group(9):
+                result['goodput_l_bps'] = float(match.group(9))
+            if match.group(10):
+                result['goodput_r_bps'] = float(match.group(10))
+            return result
 
-        # Pattern for audio mode
-        audio_pattern = r'\[\s*(\d+)\s*ms\]\s*Mode B Audio'
+        # Pattern for audio mode (extended with SNR, BER, PER, frames)
+        # SNR can be 'inf' or a number like '20.0'
+        audio_pattern = (
+            r'\[\s*(\d+)\s*ms\]\s*Mode B Audio'
+            r'(?:\s*\|\s*snr=([\d.inf-]+)dB\s+ber=([\d.]+)\s+per=([\d.]+)\s+'
+            r'frames=(\d+)\s+lost=(\d+))?'
+        )
         match = re.search(audio_pattern, line)
         if match:
-            return {
+            result = {
                 't_ms': int(match.group(1)),
                 'mode': 'audio',
             }
+            # Add optional extended metrics if present
+            if match.group(2):
+                snr_str = match.group(2)
+                if snr_str == 'inf' or snr_str == '-inf':
+                    result['snr_db'] = 99.0 if snr_str == 'inf' else -99.0
+                else:
+                    result['snr_db'] = float(snr_str)
+            if match.group(3):
+                result['ber'] = float(match.group(3))
+            if match.group(4):
+                result['per'] = float(match.group(4))
+            if match.group(5):
+                result['frames_total'] = int(match.group(5))
+            if match.group(6):
+                result['frames_lost'] = int(match.group(6))
+            return result
 
         return None
 

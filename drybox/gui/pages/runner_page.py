@@ -1,14 +1,18 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
-    QLabel, QTextEdit, QProgressBar
+    QLabel, QTextEdit, QProgressBar, QSplitter
 )
+from PySide6.QtCore import Qt
 from datetime import datetime
 from pathlib import Path
 import tempfile
 import yaml
 
 from drybox.gui.runner.runner_thread import RunnerThread
-from drybox.gui.widgets.metrics_graphs import CombinedMetricsGraph, DualDirectionMetricsGraph
+from drybox.gui.widgets.metrics_graphs import (
+    CombinedMetricsGraph, DualDirectionMetricsGraph, EnhancedCombinedMetricsGraph,
+    SummaryStatsWidget
+)
 
 
 class RunnerPage(QWidget):
@@ -28,41 +32,64 @@ class RunnerPage(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setSpacing(5)
+        layout.setContentsMargins(5, 5, 5, 5)
 
-        # --- Real-time Metrics Graphs ---
-        graphs_layout = QHBoxLayout()
+        # --- Main vertical splitter (graphs vs console) ---
+        main_splitter = QSplitter(Qt.Vertical)
 
-        # Left panel: Loss/Reorder rates and Jitter
-        left_graph_box = QGroupBox("Network Quality")
+        # --- Top section: Graphs in horizontal splitter ---
+        graphs_splitter = QSplitter(Qt.Horizontal)
+
+        # Left panel: Enhanced metrics with all graphs
+        left_graph_box = QGroupBox("Network Quality & Throughput")
         left_graph_layout = QVBoxLayout(left_graph_box)
-        self.left_metrics_graph = CombinedMetricsGraph()
+        left_graph_layout.setContentsMargins(5, 5, 5, 5)
+        self.left_metrics_graph = EnhancedCombinedMetricsGraph()
         left_graph_layout.addWidget(self.left_metrics_graph)
-        graphs_layout.addWidget(left_graph_box)
+        graphs_splitter.addWidget(left_graph_box)
 
         # Right panel: Both directions comparison
         right_graph_box = QGroupBox("Direction Comparison (L→R vs R→L)")
         right_graph_layout = QVBoxLayout(right_graph_box)
+        right_graph_layout.setContentsMargins(5, 5, 5, 5)
         self.right_metrics_graph = DualDirectionMetricsGraph()
         right_graph_layout.addWidget(self.right_metrics_graph)
-        graphs_layout.addWidget(right_graph_box)
+        graphs_splitter.addWidget(right_graph_box)
 
-        layout.addLayout(graphs_layout)
+        # Set initial sizes for horizontal splitter (50/50)
+        graphs_splitter.setSizes([500, 500])
 
-        # --- Status label ---
+        main_splitter.addWidget(graphs_splitter)
+
+        # --- Bottom section: Status + Progress + Log ---
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout(bottom_widget)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(5)
+
+        # Status label
         self.status_label = QLabel("Ready")
-        layout.addWidget(self.status_label)
+        bottom_layout.addWidget(self.status_label)
 
-        # --- Progress bar ---
+        # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
-        layout.addWidget(self.progress_bar)
+        bottom_layout.addWidget(self.progress_bar)
 
-        # --- Log text box ---
+        # Log text box
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        layout.addWidget(self.log_text)
+        self.log_text.setMinimumHeight(100)
+        bottom_layout.addWidget(self.log_text)
+
+        main_splitter.addWidget(bottom_widget)
+
+        # Set initial sizes for vertical splitter (70% graphs, 30% console)
+        main_splitter.setSizes([700, 300])
+
+        layout.addWidget(main_splitter)
 
     # === Logging ===
     def append_log(self, message: str):
@@ -169,6 +196,9 @@ class RunnerPage(QWidget):
         """Handle runner completion"""
         self.runner_thread = None
         self.progress_bar.hide()
+
+        # Finalize summary statistics
+        self.left_metrics_graph.finalize()
 
         if exit_code == 0:
             self.append_log("✓ Scenario completed successfully")
