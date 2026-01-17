@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "properties": {
     "mode": { "type": "string", "enum": ["audio", "byte"], "default": "audio" },
-    "duration_ms": { "type": "integer", "minimum": 1, "default": 5000 },
+    "duration_ms": { "type": "integer", "minimum": 1, "default": 2000 },
     "seed": { "type": "integer", "default": 123456 },
 
     "network": {
