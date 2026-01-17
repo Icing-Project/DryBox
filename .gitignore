@@ -3,4 +3,7 @@
 drybox.egg-info
 .venv
 .idea
+.code
+.vscode
+.claude
 runs
