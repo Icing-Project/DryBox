@@ -95,7 +95,11 @@ class MetricsWriter:
 
     def write_event(self, t_ms: int, side: str, typ: str, payload: Dict[str, Any]) -> None:
         rec = {"t_ms": t_ms, "side": side, "type": typ, "payload": payload}
-        # print(f"{rec}\n")
+        
+        # Print all "msg" type events
+        if typ == "log" and isinstance(payload, dict) and payload.get("level") == "msg":
+            print(f"[{side}@{t_ms}ms] {payload.get('msg')}", flush=True)
+        
         self._events_fp.write(json.dumps(rec) + "\n")
 
     def close(self) -> None:

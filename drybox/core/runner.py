@@ -552,6 +552,10 @@ class Runner:
                 channel=channel,
             ),
         ]
+        
+        # Adapters state
+        handshake_done = False
+        messages_sent = False
 
         try:
             while self.t_ms <= duration:
@@ -576,6 +580,21 @@ class Runner:
                     for flow in flows_audio:
                         if hasattr(flow.src, "push_tx_block") and hasattr(flow.dst, "pull_rx_block"):
                             audio_metrics = self._process_audio_direction(flow, rtt_est)
+                            
+                            if not handshake_done:
+                                l_ready = left.is_handshake_complete() if hasattr(left, 'is_handshake_complete') else True
+                                r_ready = right.is_handshake_complete() if hasattr(right, 'is_handshake_complete') else True
+
+                                if l_ready and r_ready:
+                                    handshake_done = True
+
+                            if handshake_done and not messages_sent:
+                                if hasattr(left, 'send_sdu'):
+                                    left.send_sdu(b"Hello from L")
+                                if hasattr(right, 'send_sdu'):
+                                    right.send_sdu(b"Hello from R")
+                                messages_sent = True
+                                
                             if audio_metrics:
                                 audio_frames_total += 1
                                 if audio_metrics.get('snr_db') is not None:
