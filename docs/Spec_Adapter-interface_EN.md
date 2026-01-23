@@ -8,7 +8,7 @@
 
 ### 1.1 Time loop (simulated clock)
 
-* Logical **tick**: `t_ms` (default **10 ms**). **At each tick**:
+* Logical **tick**: `t_ms` (default **1 ms**). **At each tick**:
 
   1. `on_timer(t_ms)` is called **first** on `left`, then on `right`.
   2. **I/O by mode**:

@@ -1,291 +1,62 @@
-# DryBox - Encrypted Voice Communication Simulator
+# Icing's DryBox
+Nade protocol test environment
 
-DryBox is a test bench for validating the **Nade protocol** (Noise-Authenticated Duplex Encryption) in voice transport scenarios. It simulates two virtual phones connecting through a network with controllable impairments.
+-----
 
-## Features
+## What is it ?
 
-- **Two simulation modes**: ByteLink (protocol testing) and AudioBlock (voice transport)
-- **Real-time visualization**: Network metrics, SNR, error rates, throughput graphs
-- **Network impairment simulation**: Packet loss, jitter, reordering, latency
-- **Radio channel models**: AWGN noise, Rayleigh fading with Doppler
-- **Vocoder simulation**: AMR, EVS, Opus codec mocks with packet loss concealment
-- **Audio file testing**: Load WAV files for realistic voice testing
-- **Deterministic simulation**: Seeded RNG for reproducible results
+The DryBox is a python CLI first, GUI assisted software that runs a communication simulation between two peers, “Left” and “Right”.
+Think of it as a test bench with a device on each side.
 
-## Quick Start
+Each peer can be any kind of software, while it is wrapped with a python “DryBox Adapter”, strictly following the DryBox Adapter ABI, defined in the (perhaps, slightly outdated) [documentation](https://github.com/Icing-Project/DryBox/blob/main/Spec_Adapter-interface_EN.md).
+This adapter exposes simple but crucial functions the DryBox can hook on to push and pull data from the virtual device, expecting on its end some kind of treatment - or none.
+
+The simulator runs on two different modes: Bytelink, and AudioBlock.
+
+The Bytelink mode is made to abstract the “purely communication” layer from the Nade Protocol (keep in mind the DryBox has been created for Nade’s development), and thus expects and treats the adapters’ communication as simple, easy-to-use network-like data packets.
+Its purpose is solely for core/protocol logic development and troubleshooting.
+
+The audio block mode on the other hand, transmits C-contiguous int16 arrays from one side to the other, as a - currently - fixed and continuous mono 8 kHz, 16 bits depth audio stream.
+This method is much closer to the real-world environment, and enables true FEC / Modem logic development.
+
+## How to use it ?
+
+The DryBox works both on Linux and Windows, but the Nade-Python package currently only supports Linux.
+
+Feel free to tweak a custom Adapter and test it in the DryBox !
+
+### Requirements
+
+**[UV](https://docs.astral.sh/uv/getting-started/installation/)** (It is actually not mandatory, but recommended as easier to manage)
+**[Python 3.10+](https://docs.astral.sh/uv/guides/install-python/)**
 
 ### Installation
 
+Clone the repo
+
 ```bash
-cd /home/bartosz/delivery/EIP/DryBox
-uv sync  # Install dependencies
+git clone https://github.com/Icing-Project/DryBox.git && cd DryBox
 ```
 
-### Run the GUI
+Install dependencies
+
+```bash
+uv sync
+```
+
+Run the DryBox (Gui mode)
 
 ```bash
 uv run -m drybox.gui.app
 ```
-
-### Run from Command Line
-
-```bash
-uv run -m drybox.core.runner \
-  --scenario scenarios/audio_file_test.yaml \
-  --left adapters/audio_file_adapter.py:AudioFileAdapter \
-  --right adapters/audio_file_adapter.py:AudioFileAdapter \
-  --out runs/my_test
-```
-
-## Project Structure
-
-```
-DryBox/
-├── drybox/
-│   ├── core/           # Simulation engine
-│   │   ├── runner.py   # Main simulation loop
-│   │   ├── scenario.py # Scenario loading/validation
-│   │   └── metrics.py  # Metrics output (CSV, JSON)
-│   ├── gui/            # Qt GUI application
-│   │   ├── app.py      # Main window
-│   │   ├── pages/      # Tab pages (General, Adapters, Runner)
-│   │   └── widgets/    # Graph widgets
-│   ├── net/            # Network simulation
-│   │   ├── bearers.py  # Bearer models (VoLTE, GSM, etc.)
-│   │   └── sar_lite.py # Segmentation & reassembly
-│   ├── radio/          # Radio channel simulation
-│   │   ├── channel_awgn.py    # AWGN channel
-│   │   ├── channel_fading.py  # Rayleigh fading
-│   │   └── vocoder_models.py  # Codec mocks
-│   └── schema/         # JSON schemas for validation
-├── adapters/           # Adapter implementations
-├── scenarios/          # Example scenario files
-├── runs/               # Simulation output directory
-└── docs/               # Additional documentation
-```
-
-## Simulation Modes
-
-### Mode A: ByteLink (Protocol Testing)
-
-Tests the Nade protocol at the byte level:
-- Noise XK handshake
-- Encrypted TLV framing
-- Rekey operations
-- Control/voice multiplexing
-
-**Metrics tracked**: Loss rate, reorder rate, jitter, latency, RTT, goodput
-
-### Mode B: AudioBlock (Voice Transport)
-
-Tests voice transmission through simulated radio channels:
-- FSK modem simulation
-- Vocoder encode/decode
-- Channel impairments (noise, fading)
-- Packet loss concealment
-
-**Metrics tracked**: SNR, BER, PER, frame loss
-
-## Configuration
-
-### Scenario File (YAML)
-
-```yaml
-mode: audio              # 'audio' or 'byte'
-duration_ms: 10000       # Simulation duration
-seed: 42                 # Random seed for reproducibility
-
-network:
-  bearer: volte_evs      # volte_evs, cs_gsm, pstn_g711, ott_udp
-  latency_ms: 50         # One-way latency
-  jitter_ms: 10          # Jitter variation
-  loss_rate: 0.05        # Packet loss (0-1)
-  reorder_rate: 0.02     # Reordering rate (0-1)
-
-left:
-  adapter: audio_file_adapter.py
-  gain: 1.0
-  modem:
-    audio_file: /path/to/audio.wav
-    loop: true
-    channel_type: awgn   # none, awgn, fading
-    snr_db: 15           # Signal-to-noise ratio
-    vocoder: amr12k2_mock
-
-right:
-  adapter: audio_file_adapter.py
-  gain: 1.0
-  modem:
-    channel_type: none
-    vocoder: none
-```
-
-### Bearer Types
-
-| Bearer | Description | Typical Use |
-|--------|-------------|-------------|
-| `volte_evs` | VoLTE with EVS codec | Modern 4G/5G voice |
-| `cs_gsm` | Circuit-switched GSM | Legacy 2G/3G |
-| `pstn_g711` | PSTN with G.711 | Landline simulation |
-| `ott_udp` | Over-the-top UDP | VoIP apps |
-
-### Channel Types
-
-| Channel | Description | Parameters |
-|---------|-------------|------------|
-| `none` | No impairment | - |
-| `awgn` | Additive White Gaussian Noise | `snr_db` |
-| `fading` | Rayleigh fading | `snr_db`, `doppler_hz`, `num_paths` |
-
-### Vocoders
-
-| Vocoder | Description |
-|---------|-------------|
-| `none` | Pass-through (no codec) |
-| `amr12k2_mock` | AMR 12.2 kbps simulation |
-| `evs13k2_mock` | EVS 13.2 kbps simulation |
-| `opus_nb_mock` | Opus narrowband simulation |
-
-## GUI Usage
-
-### General Tab
-- Set simulation mode (audio/byte)
-- Configure duration and random seed
-- Set network parameters (bearer, loss, jitter, latency)
-
-### Adapters Tab
-- Select left and right adapters
-- Configure adapter-specific settings
-
-### Runner Tab
-- Click **Run** to start simulation
-- View real-time graphs and metrics
-- Resize panels by dragging borders
-- View log output and summary statistics
-
-### Graph Panels
-
-**Byte Mode:**
-- Network Metrics (loss rate, reorder rate)
-- Jitter (L→R, R→L)
-- Goodput (throughput)
-- RTT (round-trip time)
-
-**Audio Mode:**
-- SNR (signal-to-noise ratio)
-- BER/PER (bit/packet error rates)
-- Frame Statistics (total vs lost)
-
-## Audio File Testing
-
-### Requirements
-- Format: WAV (16-bit PCM)
-- Sample rate: 8000 Hz
-- Channels: Mono
-
-### Convert Audio Files
+or CLI mode
 
 ```bash
-# Convert any audio to compatible format
-ffmpeg -i input.mp3 -ar 8000 -ac 1 -sample_fmt s16 output.wav
+uv run drybox-run --help
 ```
 
-### Using Audio Files
+### To install the Nade-Python package, which will be recognized as a DryBox Adapter
 
-1. Place WAV file in `drybox/WAV/` directory
-2. Create scenario with `audio_file` parameter:
-   ```yaml
-   left:
-     modem:
-       audio_file: /path/to/audio.wav
-       loop: true
-   ```
-3. Run with `audio_file_adapter.py`
-
-## Output Files
-
-Each simulation run creates:
-
-| File | Description |
-|------|-------------|
-| `metrics.csv` | Timestamped metrics data |
-| `events.jsonl` | Custom adapter events |
-| `capture.dbxcap` | Binary packet capture |
-| `scenario.resolved.yaml` | Final resolved configuration |
-| `pubkeys.txt` | Cryptographic key info |
-
-## Writing Custom Adapters
-
-Adapters must implement the following interface:
-
-```python
-class MyAdapter:
-    def nade_capabilities(self) -> dict:
-        """Declare supported modes"""
-        return {"bytelink": True, "audioblock": True}
-
-    def init(self, cfg: dict) -> None:
-        """Initialize with configuration"""
-        pass
-
-    def start(self, ctx) -> None:
-        """Start adapter with context"""
-        pass
-
-    def on_timer(self, t_ms: int) -> None:
-        """Called every tick"""
-        pass
-
-    # ByteLink mode
-    def on_link_rx(self, sdu: bytes) -> None:
-        """Receive data"""
-        pass
-
-    def poll_link_tx(self, budget: int) -> list:
-        """Send data"""
-        return []
-
-    # AudioBlock mode
-    def push_tx_block(self, t_ms: int) -> np.ndarray:
-        """Return 160 samples of int16 PCM"""
-        return np.zeros(160, dtype=np.int16)
-
-    def pull_rx_block(self, pcm: np.ndarray, t_ms: int) -> None:
-        """Receive processed audio"""
-        pass
+```bash
+uv add --dev {Path to Nade-Python package}
 ```
-
-## Troubleshooting
-
-### No graphs showing
-- Ensure simulation is running (check progress bar)
-- Check log for errors
-- Verify scenario file is valid YAML
-
-### SNR shows 'inf'
-- Normal for silent audio (no signal = infinite SNR)
-- Use audio files with continuous speech
-- Set `loop: true` to avoid silence at end
-
-### Audio file not loading
-- Check file is 8kHz mono WAV
-- Verify path in scenario is correct
-- Check log for "audio_file_loaded" event
-
-### Simulation fails immediately
-- Check scenario YAML syntax
-- Verify adapter paths are correct
-- Look for schema validation errors in log
-
-## Dependencies
-
-- Python 3.11+
-- PySide6 (Qt GUI)
-- PyQtGraph (real-time graphs)
-- NumPy (numerical processing)
-- PyYAML (configuration)
-- cryptography (Noise protocol)
-
-## License
-
-MIT License

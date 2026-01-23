@@ -17,10 +17,7 @@ try:
 except ImportError as e:
     raise SystemExit("jsonschema is required. Install with `uv add jsonschema`") from e
 
-try:
-    from importlib import resources
-except Exception as e:  # pragma: no cover
-    raise SystemExit("Python 3.9+ importlib.resources is required") from e
+from drybox.core.paths import resolve_resource_path, SCENARIOS_DIR
 
 
 class ScenarioValidationError(Exception):
@@ -42,63 +39,43 @@ class ScenarioResolved:
     # ---------- Resource resolution helpers ----------
 
     @staticmethod
-    def _read_text_from_pkg_path(pkg: str, *rel_parts: str) -> str | None:
-        try:
-            base = resources.files(pkg)
-        except ModuleNotFoundError:
-            return None
-
-        target = base
-        for part in rel_parts:
-            target = target.joinpath(part)
-
-        try:
-            with resources.as_file(target) as real_path:
-                if real_path.is_file():
-                    return real_path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return None
-        return None
-
-    @staticmethod
     def _resolve_scenario_text(path_or_name: Union[str, pathlib.Path]) -> str:
         p = pathlib.Path(path_or_name)
+
+        # 1. Direct file path
         if p.exists() and p.is_file():
             return p.read_text(encoding="utf-8")
 
+        # 2. Try as scenario name in scenarios directory
         name = p.name
-        text = ScenarioResolved._read_text_from_pkg_path("drybox", "scenarios", name)
-        if text is not None:
-            return text
+        scenario_path = resolve_resource_path("scenarios", name)
+        if scenario_path and scenario_path.is_file():
+            return scenario_path.read_text(encoding="utf-8")
 
+        # 3. Structured path fallback (scenarios/subdir/file.yaml)
         if p.parts and p.parts[0] == "scenarios" and len(p.parts) > 1:
-            text = ScenarioResolved._read_text_from_pkg_path("drybox", *p.parts)
-            if text is not None:
-                return text
+            scenario_path = resolve_resource_path(*p.parts)
+            if scenario_path and scenario_path.is_file():
+                return scenario_path.read_text(encoding="utf-8")
 
         raise FileNotFoundError(
-            "Scenario file not found. Tried:\n"
+            f"Scenario not found. Tried:\n"
             f"  - {p}\n"
-            f"  - [pkg] drybox/scenarios/{name}"
+            f"  - {SCENARIOS_DIR / name}"
         )
 
     @staticmethod
     def _load_schema() -> Dict[str, Any]:
-        text = ScenarioResolved._read_text_from_pkg_path("drybox", "schema", "scenario.schema.json")
-        if text is not None:
-            return json.loads(text)
-
-        fallback = pathlib.Path(__file__).resolve().parents[1] / "schema" / "scenario.schema.json"
-        if fallback.exists():
-            return json.loads(fallback.read_text(encoding="utf-8"))
-
+        schema_path = resolve_resource_path("schema", "scenario.schema.json")
+        if schema_path:
+            return json.loads(schema_path.read_text(encoding="utf-8"))
         raise FileNotFoundError("Could not locate schema 'scenario.schema.json'")
 
     @staticmethod
     def _apply_defaults(doc: Dict[str, Any]) -> Dict[str, Any]:
         out = dict(doc) if doc else {}
         out.setdefault("mode", "audio")
-        out.setdefault("duration_ms", 1000)
+        out.setdefault("duration_ms", 2000)
         out.setdefault("seed", 123456)
         out.setdefault("cfo_hz", 0)
         out.setdefault("ppm", 0)

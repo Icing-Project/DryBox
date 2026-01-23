@@ -35,7 +35,7 @@ class GeneralPage(QWidget):
         self.duration_spin = QSpinBox()
         self.duration_spin.setRange(0, 50000)
         self.duration_spin.setSingleStep(100)
-        self.duration_spin.setValue(1000)
+        self.duration_spin.setValue(2000)
         basic_layout.addRow("Duration (ms):", self.duration_spin)
 
         # Seed

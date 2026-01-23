@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import yaml
 
+from drybox.core.paths import get_runs_dir, safe_mkdir
 from drybox.gui.runner.runner_thread import RunnerThread
 from drybox.gui.widgets.metrics_graphs import (
     CombinedMetricsGraph, DualDirectionMetricsGraph, EnhancedCombinedMetricsGraph,
@@ -134,14 +135,14 @@ class RunnerPage(QWidget):
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
             # --- Output directory ---
-            project_runs = Path(__file__).resolve().parents[3] / "runs"
+            project_runs = get_runs_dir()
             output_dir_path = project_runs / f"gui_{timestamp}"
             try:
-                output_dir_path.mkdir(parents=True, exist_ok=True)
+                safe_mkdir(output_dir_path)
             except OSError:
                 fallback_root = Path(tempfile.mkdtemp(prefix="drybox-run-"))
                 output_dir_path = fallback_root / f"gui_{timestamp}"
-                output_dir_path.mkdir(parents=True, exist_ok=True)
+                safe_mkdir(output_dir_path)
                 self.append_log(f"Runs directory fallback -> {output_dir_path}")
 
             # === Scenario file alongside run artifacts ===
