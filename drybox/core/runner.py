@@ -168,6 +168,10 @@ class Runner:
                 caps = {}
 
         # Initialisation lato sensu (init + start)
+        # Get modem config for this side from scenario
+        side_cfg = self.scenario.left if side == "L" else self.scenario.right
+        modem_cfg = dict(side_cfg.get("modem", {}) or {}) if side_cfg else {}
+
         cfg = {
             "tick_ms": self.tick_ms,
             "side": side,
@@ -176,6 +180,7 @@ class Runner:
             "sdu_max_bytes": DEFAULT_SDU_MAX,  # hint v1; override via capabilities côté adapter si utile
             "out_dir": str(self.out_dir),
             "crypto": crypto_cfg,
+            "modem": modem_cfg,  # Pass modem config to adapter
         }
         if hasattr(inst, "init"):
             inst.init(cfg)  # type: ignore[attr-defined]
@@ -235,14 +240,25 @@ class Runner:
         Apply vocoder encode/decode/process and simulate packet loss per bearer loss_rate.
         Returns pcm_processed and optionally writes DROP metric if loss occurs.
         """
+        pcm_processed, _ = self._apply_vocoder_and_loss_tracked(pcm_in, flow)
+        return pcm_processed
+
+    def _apply_vocoder_and_loss_tracked(self, pcm_in, flow: AudioFlow) -> Tuple[Any, bool]:
+        """
+        Apply vocoder encode/decode/process and simulate packet loss per bearer loss_rate.
+        Returns (pcm_processed, frame_lost) tuple for tracking.
+        """
         pcm_processed = pcm_in
+        frame_lost = False
+
         if flow.vocoder is None:
-            return pcm_processed
+            return pcm_processed, frame_lost
 
         loss_rate = self.bearer_params.get("loss_rate", 0.0)
         if self.rng.random() < loss_rate:
             # Frame lost - PLC
             pcm_processed = flow.vocoder.process_frame(None)
+            frame_lost = True
             self.metrics.write_metric(
                 t_ms=self.t_ms,
                 side=flow.rx_side,
@@ -255,7 +271,7 @@ class Runner:
             pcm_processed = flow.vocoder.decode(bitstream)
             pcm_processed = flow.vocoder.process_frame(pcm_processed)
 
-        return pcm_processed
+        return pcm_processed, frame_lost
 
     def _write_audio_tx_rx_metrics(self, tx_side: str, rx_side: str, rtt_est: float):
         # Keep same metric keys as original
@@ -268,11 +284,13 @@ class Runner:
             latency_ms=0.0
         )
 
-    def _process_audio_direction(self, flow: AudioFlow, rtt_est: float):
+    def _process_audio_direction(self, flow: AudioFlow, rtt_est: float) -> Optional[Dict[str, Any]]:
+        """Process audio in one direction and return metrics dict for UI tracking."""
         pcm = self._safe_call(f"{flow.label} audio push", flow.src.push_tx_block, self.t_ms)
         if pcm is None or pcm.size == 0:
-            return
+            return None
 
+        result_metrics: Dict[str, Any] = {'frame_lost': False, 'snr_db': None, 'ber': None}
         pcm_processed = pcm
 
         # Apply channel
@@ -280,20 +298,28 @@ class Runner:
             pcm_processed = flow.channel.apply(pcm)
             if hasattr(flow.channel, "get_estimated_snr"):
                 snr_est = flow.channel.get_estimated_snr(pcm, pcm_processed)
+                result_metrics['snr_db'] = snr_est
                 self.metrics.write_metric(
                     t_ms=self.t_ms, side=flow.rx_side,
                     layer=LAYER_AUDIOBLOCK, event=EVENT_RX,
                     snr_db_est=snr_est,
                 )
+            # Estimate BER from signal degradation
+            if hasattr(flow.channel, "estimate_ber"):
+                ber_est = flow.channel.estimate_ber()
+                result_metrics['ber'] = ber_est
 
         # Apply vocoder + loss
-        pcm_processed = self._apply_vocoder_and_loss(pcm_processed, flow)
+        pcm_processed, frame_lost = self._apply_vocoder_and_loss_tracked(pcm_processed, flow)
+        result_metrics['frame_lost'] = frame_lost
 
         # Deliver
         self._safe_call(f"{flow.label} audio pull", flow.dst.pull_rx_block, pcm_processed, self.t_ms)
 
         # Metrics
         self._write_audio_tx_rx_metrics(flow.tx_side, flow.rx_side, rtt_est)
+
+        return result_metrics
     
     def _poll_and_send_bytemode(self, flow: ByteFlow, rtt_est: float, budget_per_tick: int):
         """
@@ -469,6 +495,17 @@ class Runner:
         bytes_rx_l = 0
         bytes_rx_r = 0
         window_start_ms = 0
+
+        # Track goodput for UI display
+        last_goodput_l = 0.0
+        last_goodput_r = 0.0
+
+        # Track audio metrics for UI display
+        last_snr_db = 0.0
+        last_ber = 0.0
+        last_per = 0.0
+        audio_frames_total = 0
+        audio_frames_lost = 0
         
         # --- Byte flows (mode A) ---
         flows_byte = [
@@ -515,6 +552,10 @@ class Runner:
                 channel=channel,
             ),
         ]
+        
+        # Adapters state
+        handshake_done = False
+        messages_sent = False
 
         try:
             while self.t_ms <= duration:
@@ -538,13 +579,38 @@ class Runner:
                         raise SystemExit("Mode B (audio) requires numpy. Install with `pip install numpy`.")
                     for flow in flows_audio:
                         if hasattr(flow.src, "push_tx_block") and hasattr(flow.dst, "pull_rx_block"):
-                            self._process_audio_direction(flow, rtt_est)
+                            audio_metrics = self._process_audio_direction(flow, rtt_est)
+                            
+                            if not handshake_done:
+                                l_ready = left.is_handshake_complete() if hasattr(left, 'is_handshake_complete') else True
+                                r_ready = right.is_handshake_complete() if hasattr(right, 'is_handshake_complete') else True
+
+                                if l_ready and r_ready:
+                                    handshake_done = True
+
+                            if handshake_done and not messages_sent:
+                                if hasattr(left, 'send_sdu'):
+                                    left.send_sdu(b"Hello from L")
+                                if hasattr(right, 'send_sdu'):
+                                    right.send_sdu(b"Hello from R")
+                                messages_sent = True
+                                
+                            if audio_metrics:
+                                audio_frames_total += 1
+                                if audio_metrics.get('snr_db') is not None:
+                                    last_snr_db = audio_metrics['snr_db']
+                                if audio_metrics.get('ber') is not None:
+                                    last_ber = audio_metrics['ber']
+                                if audio_metrics.get('frame_lost'):
+                                    audio_frames_lost += 1
 
                 # (5) Goodput fenêtré (1 s)
                 if self.scenario.mode == "byte" and self.t_ms - window_start_ms >= 1000:
                     dur = max(1, self.t_ms - window_start_ms)
                     g_l = (bytes_rx_l * 8) / dur * 1000.0
                     g_r = (bytes_rx_r * 8) / dur * 1000.0
+                    last_goodput_l = g_l
+                    last_goodput_r = g_r
                     self.metrics.write_metric(t_ms=self.t_ms, side="L", layer=LAYER_BYTELINK, event=EVENT_TICK,
                                               goodput_bps=g_l)
                     self.metrics.write_metric(t_ms=self.t_ms, side="R", layer=LAYER_BYTELINK, event=EVENT_TICK,
@@ -561,12 +627,17 @@ class Runner:
                         print(
                             f"[{self.t_ms:6d} ms] "
                             f"L->R loss={s_l.loss_rate:.3f} reord={s_l.reorder_rate:.3f} jitter={s_l.jitter_ms:.1f}ms | "
-                            f"R->L loss={s_r.loss_rate:.3f} reord={s_r.reorder_rate:.3f} jitter={s_r.jitter_ms:.1f}ms",
+                            f"R->L loss={s_r.loss_rate:.3f} reord={s_r.reorder_rate:.3f} jitter={s_r.jitter_ms:.1f}ms | "
+                            f"rtt={rtt_est:.0f}ms gp_l={last_goodput_l:.0f}bps gp_r={last_goodput_r:.0f}bps",
                             file=sys.stderr,
                         )
                     elif self.scenario.mode == "audio":
+                        # Calculate PER from tracked frames
+                        per_value = (audio_frames_lost / audio_frames_total) if audio_frames_total > 0 else 0.0
                         print(
-                            f"[{self.t_ms:6d} ms] Mode B Audio - Direct passthrough active",
+                            f"[{self.t_ms:6d} ms] Mode B Audio | "
+                            f"snr={last_snr_db:.1f}dB ber={last_ber:.4f} per={per_value:.3f} "
+                            f"frames={audio_frames_total} lost={audio_frames_lost}",
                             file=sys.stderr,
                         )
                     last_ui_print = self.t_ms

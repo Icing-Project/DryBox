@@ -70,7 +70,9 @@
             "channel_type": { "type": "string", "enum": ["none", "awgn", "fading"], "default": "none" },
             "snr_db": { "type": "integer", "minimum": 0, "default": 20 },
             "doppler_hz": { "type": "integer", "minimum": 0, "default": 50 },
-            "num_paths": { "type": "integer", "minimum": 1, "default": 8 }
+            "num_paths": { "type": "integer", "minimum": 1, "default": 8 },
+            "audio_file": { "type": "string", "description": "Path to WAV file for audio file adapter" },
+            "loop": { "type": "boolean", "default": true, "description": "Loop audio file playback" }
           },
           "additionalProperties": false
         }

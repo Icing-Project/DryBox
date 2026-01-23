@@ -1,0 +1,34 @@
+# Audio File Test Scenario
+# Tests audio transmission through simulated channel with impairments
+
+mode: audio
+duration_ms: 11000  # Slightly longer than audio file (10.66s)
+seed: 42
+
+# Network configuration (affects packet loss simulation)
+network:
+  bearer: volte_evs
+  latency_ms: 50
+  jitter_ms: 10
+  loss_rate: 0.05  # 5% packet loss for visible effect
+
+# Left endpoint - plays the audio file
+left:
+  adapter: audio_file_adapter.py
+  gain: 1.0
+  modem:
+    audio_file: /home/bartosz/delivery/EIP/DryBox/drybox/WAV/test_audio.wav
+    loop: true
+    channel_type: awgn
+    snr_db: 15
+    vocoder: amr12k2_mock
+
+# Right endpoint - receives audio
+right:
+  adapter: audio_file_adapter.py
+  gain: 1.0
+  modem:
+    audio_file: /home/bartosz/delivery/EIP/DryBox/drybox/WAV/test_audio.wav
+    loop: false
+    channel_type: none
+    vocoder: none

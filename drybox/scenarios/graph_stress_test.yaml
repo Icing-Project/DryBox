@@ -1,0 +1,46 @@
+# DryBox Graph Stress Test Scenario
+# Uses test traffic adapter to generate continuous data flow
+# This creates visible variations in loss, jitter, and reorder graphs
+
+mode: byte
+duration_ms: 60000          # 60 seconds for good graph visualization
+seed: 12345
+
+network:
+  bearer: volte_evs
+  loss_rate: 0.08           # 8% base packet loss
+  latency_ms: 40            # 40ms base latency
+  jitter_ms: 25             # 25ms jitter (significant variation)
+  reorder_rate: 0.05        # 5% packet reordering
+  ge_p_good_bad: 0.02       # Higher transition to bad state (more bursty)
+  ge_p_bad_good: 0.15       # Recovery from bad state
+  mtu_bytes: 1500
+
+# Test traffic adapter generates continuous packets
+left:
+  adapter: test_traffic_adapter.py
+  gain: 1.0
+  traffic:
+    interval_ms: 20         # Send packet every 20ms (50 packets/sec)
+    packet_size: 200        # 200 bytes per packet
+  modem:
+    vocoder: none
+    vad_dtx: false
+    channel_type: none
+    snr_db: 20
+    doppler_hz: 50
+    num_paths: 8
+
+right:
+  adapter: test_traffic_adapter.py
+  gain: 1.0
+  traffic:
+    interval_ms: 20
+    packet_size: 200
+  modem:
+    vocoder: none
+    vad_dtx: false
+    channel_type: none
+    snr_db: 20
+    doppler_hz: 50
+    num_paths: 8

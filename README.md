@@ -8,7 +8,7 @@ Nade protocol test environment
 The DryBox is a python CLI first, GUI assisted software that runs a communication simulation between two peers, “Left” and “Right”.
 Think of it as a test bench with a device on each side.
 
-Each peer can be any kind of software, while it is wrapped with a python “DryBox Adapter”, strictly following the DryBox Adapter ABI, defined in the (perhaps, slightly outdated) [documentation](https://github.com/Icing-Project/DryBox/blob/main/Spec_Adapter-interface_EN.md).
+Each peer can be any kind of software, while it is wrapped with a python “DryBox Adapter”, strictly following the DryBox Adapter ABI, defined in the (perhaps, slightly outdated) [documentation](https://github.com/Icing-Project/DryBox/blob/main/docs/Spec_Adapter-interface_EN.md).
 This adapter exposes simple but crucial functions the DryBox can hook on to push and pull data from the virtual device, expecting on its end some kind of treatment - or none.
 
 The simulator runs on two different modes: Bytelink, and AudioBlock.

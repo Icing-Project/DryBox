@@ -1,0 +1,41 @@
+# DryBox Graph Test Scenario
+# This scenario has non-zero loss, jitter, and reorder rates to visualize on graphs
+
+mode: byte                  # "byte" mode shows more network metrics
+duration_ms: 30000          # 30 seconds - enough time to see trends
+seed: 42
+
+# --- Network settings with impairments for visible graph data ---
+network:
+  bearer: volte_evs
+  loss_rate: 0.05           # 5% packet loss - will show on graphs
+  latency_ms: 50            # 50ms latency
+  jitter_ms: 15             # 15ms jitter - will vary over time
+  reorder_rate: 0.02        # 2% reorder rate - will show on graphs
+  ge_p_good_bad: 0.01       # Gilbert-Elliott: higher transition to bad state
+  ge_p_bad_good: 0.2        # Gilbert-Elliott: recovery from bad state
+  mtu_bytes: 1500
+
+# --- Left Adapter ---
+left:
+  adapter: entrypoint:nade-python
+  gain: 1.0
+  modem:
+    vocoder: none
+    vad_dtx: false
+    channel_type: none
+    snr_db: 20
+    doppler_hz: 50
+    num_paths: 8
+
+# --- Right Adapter ---
+right:
+  adapter: entrypoint:nade-python
+  gain: 1.0
+  modem:
+    vocoder: none
+    vad_dtx: false
+    channel_type: none
+    snr_db: 20
+    doppler_hz: 50
+    num_paths: 8
