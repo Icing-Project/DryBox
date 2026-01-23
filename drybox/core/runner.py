@@ -620,7 +620,7 @@ class Runner:
                     window_start_ms = self.t_ms
 
                 # (6) UI minimale (stderr)
-                if self.ui_enabled and (self.t_ms - last_ui_print) >= 1000:
+                if self.ui_enabled and (self.t_ms - last_ui_print) >= 100:
                     if self.scenario.mode == "byte":
                         s_l: BearerStatsSnapshot = bearer_l2r.stats()
                         s_r: BearerStatsSnapshot = bearer_r2l.stats()

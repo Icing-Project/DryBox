@@ -15,7 +15,7 @@ class MetricsGraphWidget(QWidget):
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.title = title
-        self.max_points = 100  # Keep last 100 data points
+        self.max_points = 1000  # Keep last 1000 data points
 
         # Data storage
         self.time_data = []
@@ -34,7 +34,7 @@ class MetricsGraphWidget(QWidget):
         self.plot_widget = pg.PlotWidget()
         self.plot_widget.setBackground('w')
         self.plot_widget.setTitle(self.title, color='k', size='10pt')
-        self.plot_widget.setLabel('bottom', 'Time', units='s')
+        self.plot_widget.setLabel('bottom', 'Time', units='ms')
         self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
         self.plot_widget.addLegend(offset=(10, 10))
 
@@ -62,8 +62,7 @@ class MetricsGraphWidget(QWidget):
             t_ms: Time in milliseconds
             values: Dict mapping series name to value
         """
-        t_sec = t_ms / 1000.0
-        self.time_data.append(t_sec)
+        self.time_data.append(t_ms)
 
         # Trim old data
         if len(self.time_data) > self.max_points:
