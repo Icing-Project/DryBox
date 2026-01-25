@@ -157,6 +157,10 @@ class Runner:
         # Metrics
         self.total_bytes_l = 0
         self.total_bytes_r = 0
+        
+        # Adapters state
+        self.handshake_done = False
+        self.messages_sent = False
 
     # --------- Chargement / lifecycle ----------
     def _load_adapter(self, spec: str, side: str, crypto_cfg: Dict[str, Any]):
@@ -397,6 +401,21 @@ class Runner:
                 loss_rate=st.loss_rate,
                 reorder_rate=st.reorder_rate,
             )
+    
+    def _send_msg_if_handshake_is_complete(self, left, right):
+        if not self.handshake_done:
+            l_ready = left.is_handshake_complete() if hasattr(left, 'is_handshake_complete') else True
+            r_ready = right.is_handshake_complete() if hasattr(right, 'is_handshake_complete') else True
+
+            if l_ready and r_ready:
+                self.handshake_done = True
+
+        if self.handshake_done and not self.messages_sent:
+            if hasattr(left, 'send_sdu'):
+                left.send_sdu(b"Hello from L")
+            if hasattr(right, 'send_sdu'):
+                right.send_sdu(b"Hello from R")
+            self.messages_sent = True
 
     # --------- Exécution ----------
     def run(self) -> int:
@@ -566,10 +585,6 @@ class Runner:
                 channel=channel,
             ),
         ]
-        
-        # Adapters state
-        handshake_done = False
-        messages_sent = False
 
         try:
             while self.t_ms <= duration:
@@ -586,6 +601,8 @@ class Runner:
                             self._poll_and_send_bytemode(flow, rtt_est, budget_per_tick)
                         for dat in flow.bearer.poll_deliver(self.t_ms):
                             self._deliver_bearer_to_adapter(dat, flow)
+                        
+                        self._send_msg_if_handshake_is_complete(left, right)
 
                 elif self.scenario.mode == "audio":
                     # Mode B: AudioBlock
@@ -595,19 +612,7 @@ class Runner:
                         if hasattr(flow.src, "push_tx_block") and hasattr(flow.dst, "pull_rx_block"):
                             audio_metrics = self._process_audio_direction(flow, rtt_est)
                             
-                            if not handshake_done:
-                                l_ready = left.is_handshake_complete() if hasattr(left, 'is_handshake_complete') else True
-                                r_ready = right.is_handshake_complete() if hasattr(right, 'is_handshake_complete') else True
-
-                                if l_ready and r_ready:
-                                    handshake_done = True
-
-                            if handshake_done and not messages_sent:
-                                if hasattr(left, 'send_sdu'):
-                                    left.send_sdu(b"Hello from L")
-                                if hasattr(right, 'send_sdu'):
-                                    right.send_sdu(b"Hello from R")
-                                messages_sent = True
+                            self._send_msg_if_handshake_is_complete(left, right)
                                 
                             if audio_metrics:
                                 audio_symbols_total += 1
