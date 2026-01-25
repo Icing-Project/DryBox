@@ -153,6 +153,14 @@ class Runner:
 
         # Horloge logique
         self.t_ms: int = 0
+        
+        # Metrics
+        self.total_bytes_l = 0
+        self.total_bytes_r = 0
+        
+        # Adapters state
+        self.handshake_done = False
+        self.messages_sent = False
 
     # --------- Chargement / lifecycle ----------
     def _load_adapter(self, spec: str, side: str, crypto_cfg: Dict[str, Any]):
@@ -283,6 +291,13 @@ class Runner:
             t_ms=self.t_ms, side=rx_side, layer=LAYER_AUDIOBLOCK, event=EVENT_RX,
             latency_ms=0.0
         )
+    
+    def _on_bytes_processed_update(self, side: str, total_bytes: int) -> None:
+        """Callback to track total_bytes_processed from demod events."""
+        if side == "L":
+            self.total_bytes_l = total_bytes
+        elif side == "R":
+            self.total_bytes_r = total_bytes
 
     def _process_audio_direction(self, flow: AudioFlow, rtt_est: float) -> Optional[Dict[str, Any]]:
         """Process audio in one direction and return metrics dict for UI tracking."""
@@ -386,6 +401,21 @@ class Runner:
                 loss_rate=st.loss_rate,
                 reorder_rate=st.reorder_rate,
             )
+    
+    def _send_msg_if_handshake_is_complete(self, left, right):
+        if not self.handshake_done:
+            l_ready = left.is_handshake_complete() if hasattr(left, 'is_handshake_complete') else True
+            r_ready = right.is_handshake_complete() if hasattr(right, 'is_handshake_complete') else True
+
+            if l_ready and r_ready:
+                self.handshake_done = True
+
+        if self.handshake_done and not self.messages_sent:
+            if hasattr(left, 'send_sdu'):
+                left.send_sdu(b"Hello from L")
+            if hasattr(right, 'send_sdu'):
+                right.send_sdu(b"Hello from R")
+            self.messages_sent = True
 
     # --------- Exécution ----------
     def run(self) -> int:
@@ -423,6 +453,9 @@ class Runner:
         left, left_caps = self._load_adapter(self.left_adapter_spec, "L", l_crypto)
         right, right_caps = self._load_adapter(self.right_adapter_spec, "R", r_crypto)
         self._require_mode_supported(left_caps, right_caps)
+        
+        # Callback for bytes processed metrics
+        self.metrics.set_bytes_callback(self._on_bytes_processed_update)
 
         # 1) Configure bearer (translate 'network' => bearer type + params)
         # Schema: network: { bearer: "volte_evs", latency_ms: 20, ... }
@@ -504,8 +537,8 @@ class Runner:
         last_snr_db = 0.0
         last_ber = 0.0
         last_per = 0.0
-        audio_frames_total = 0
-        audio_frames_lost = 0
+        audio_symbols_total = 0
+        audio_symbols_lost = 0
         
         # --- Byte flows (mode A) ---
         flows_byte = [
@@ -552,10 +585,6 @@ class Runner:
                 channel=channel,
             ),
         ]
-        
-        # Adapters state
-        handshake_done = False
-        messages_sent = False
 
         try:
             while self.t_ms <= duration:
@@ -572,6 +601,8 @@ class Runner:
                             self._poll_and_send_bytemode(flow, rtt_est, budget_per_tick)
                         for dat in flow.bearer.poll_deliver(self.t_ms):
                             self._deliver_bearer_to_adapter(dat, flow)
+                        
+                        self._send_msg_if_handshake_is_complete(left, right)
 
                 elif self.scenario.mode == "audio":
                     # Mode B: AudioBlock
@@ -581,28 +612,16 @@ class Runner:
                         if hasattr(flow.src, "push_tx_block") and hasattr(flow.dst, "pull_rx_block"):
                             audio_metrics = self._process_audio_direction(flow, rtt_est)
                             
-                            if not handshake_done:
-                                l_ready = left.is_handshake_complete() if hasattr(left, 'is_handshake_complete') else True
-                                r_ready = right.is_handshake_complete() if hasattr(right, 'is_handshake_complete') else True
-
-                                if l_ready and r_ready:
-                                    handshake_done = True
-
-                            if handshake_done and not messages_sent:
-                                if hasattr(left, 'send_sdu'):
-                                    left.send_sdu(b"Hello from L")
-                                if hasattr(right, 'send_sdu'):
-                                    right.send_sdu(b"Hello from R")
-                                messages_sent = True
+                            self._send_msg_if_handshake_is_complete(left, right)
                                 
                             if audio_metrics:
-                                audio_frames_total += 1
+                                audio_symbols_total += 1
                                 if audio_metrics.get('snr_db') is not None:
                                     last_snr_db = audio_metrics['snr_db']
                                 if audio_metrics.get('ber') is not None:
                                     last_ber = audio_metrics['ber']
                                 if audio_metrics.get('frame_lost'):
-                                    audio_frames_lost += 1
+                                    audio_symbols_lost += 1
 
                 # (5) Goodput fenêtré (1 s)
                 if self.scenario.mode == "byte" and self.t_ms - window_start_ms >= 1000:
@@ -620,7 +639,7 @@ class Runner:
                     window_start_ms = self.t_ms
 
                 # (6) UI minimale (stderr)
-                if self.ui_enabled and (self.t_ms - last_ui_print) >= 1000:
+                if self.ui_enabled and (self.t_ms - last_ui_print) >= 100:
                     if self.scenario.mode == "byte":
                         s_l: BearerStatsSnapshot = bearer_l2r.stats()
                         s_r: BearerStatsSnapshot = bearer_r2l.stats()
@@ -633,11 +652,15 @@ class Runner:
                         )
                     elif self.scenario.mode == "audio":
                         # Calculate PER from tracked frames
-                        per_value = (audio_frames_lost / audio_frames_total) if audio_frames_total > 0 else 0.0
+                        per_value = (audio_symbols_lost / audio_symbols_total) if audio_symbols_total > 0 else 0.0
+                        total_bytes = audio_symbols_total // 8
+                        total_lost_bytes = audio_symbols_lost // 8
+                        
                         print(
                             f"[{self.t_ms:6d} ms] Mode B Audio | "
                             f"snr={last_snr_db:.1f}dB ber={last_ber:.4f} per={per_value:.3f} "
-                            f"frames={audio_frames_total} lost={audio_frames_lost}",
+                            f"total_bytes={total_bytes} total_lost_bytes={total_lost_bytes} "
+                            f"total_bytes_l={self.total_bytes_l} total_bytes_r={self.total_bytes_r}",
                             file=sys.stderr,
                         )
                     last_ui_print = self.t_ms

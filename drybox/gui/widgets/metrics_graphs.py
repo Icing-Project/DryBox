@@ -8,6 +8,12 @@ from PySide6.QtGui import QFont
 import pyqtgraph as pg
 import numpy as np
 
+class IntAxisItem(pg.AxisItem):
+    def tickStrings(self, values, scale, spacing):
+        # values: list of float tick positions
+        # Convert them to integers as strings (no decimals)
+        return [str(int(value)) for value in values]
+
 
 class MetricsGraphWidget(QWidget):
     """Base widget for displaying real-time metrics graphs."""
@@ -15,7 +21,7 @@ class MetricsGraphWidget(QWidget):
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.title = title
-        self.max_points = 100  # Keep last 100 data points
+        self.max_points = 1000  # Keep last 1000 data points
 
         # Data storage
         self.time_data = []
@@ -31,10 +37,10 @@ class MetricsGraphWidget(QWidget):
         pg.setConfigOptions(antialias=True)
 
         # Create plot widget
-        self.plot_widget = pg.PlotWidget()
+        self.plot_widget = pg.PlotWidget(axisItems={'bottom': IntAxisItem(orientation='bottom')})
         self.plot_widget.setBackground('w')
         self.plot_widget.setTitle(self.title, color='k', size='10pt')
-        self.plot_widget.setLabel('bottom', 'Time', units='s')
+        self.plot_widget.setLabel('bottom', 'Time (ms)')
         self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
         self.plot_widget.addLegend(offset=(10, 10))
 
@@ -62,8 +68,7 @@ class MetricsGraphWidget(QWidget):
             t_ms: Time in milliseconds
             values: Dict mapping series name to value
         """
-        t_sec = t_ms / 1000.0
-        self.time_data.append(t_sec)
+        self.time_data.append(t_ms)
 
         # Trim old data
         if len(self.time_data) > self.max_points:
@@ -301,18 +306,20 @@ class DualDirectionMetricsGraph(QWidget):
 
 
 class FrameStatsGraph(MetricsGraphWidget):
-    """Graph showing frame statistics for audio mode (frames sent vs lost)."""
+    """Graph showing frame statistics for audio mode (bytes sent vs lost) and bytes processed."""
 
     def __init__(self, parent=None):
-        super().__init__("Frame Statistics", parent)
+        super().__init__("Frame & Data Statistics", parent)
 
         # Add series for frame counts
-        self.add_series('Total Frames', '#2ecc71')  # Green
-        self.add_series('Lost Frames', '#e74c3c')  # Red
+        self.add_series('Total Bytes (includes silence)', '#2ecc71')  # Green
+        self.add_series('Total Lost Bytes (includes silence)', '#e74c3c')  # Red
+        self.add_series('Total Bytes L', '#3498db')  # Blue
+        self.add_series('Total Bytes R', '#9b59b6')  # Purple
 
         # Set Y axis (auto-scale)
         self.plot_widget.setYRange(0, 100)
-        self.plot_widget.setLabel('left', 'Frames', units='')
+        self.plot_widget.setLabel('left', 'Count', units='')
         self.plot_widget.enableAutoRange(axis='y')
 
     def update_metrics(self, metrics: dict):
@@ -321,14 +328,24 @@ class FrameStatsGraph(MetricsGraphWidget):
             return
 
         t_ms = metrics.get('t_ms', 0)
-        frames_total = metrics.get('frames_total', 0)
-        frames_lost = metrics.get('frames_lost', 0)
+        values = {}
 
-        if frames_total > 0:
-            values = {
-                'Total Frames': frames_total,
-                'Lost Frames': frames_lost,
-            }
+        total_bytes = metrics.get('total_bytes', 0)
+        total_lost_bytes = metrics.get('total_lost_bytes', 0)
+        total_bytes_l = metrics.get('total_bytes_l', 0)
+        total_bytes_r = metrics.get('total_bytes_r', 0)
+
+        if total_bytes > 0:
+            values['Total Bytes (includes silence)'] = total_bytes
+            values['Total Lost Bytes (includes silence)'] = total_lost_bytes
+        
+        if total_bytes_l > 0:
+            values['Total Bytes L'] = total_bytes_l
+        
+        if total_bytes_r > 0:
+            values['Total Bytes R'] = total_bytes_r
+
+        if values:
             self.add_data_point(t_ms, values)
 
 
@@ -518,6 +535,8 @@ class SummaryStatsWidget(QWidget):
             ('avg_snr', 'Avg SNR:', '- dB'),
             ('avg_ber', 'Avg BER:', '-'),
             ('total_per', 'Frame Loss Rate:', '-'),
+            ('total_bytes_l', 'Total Bytes L:', '0'),
+            ('total_bytes_r', 'Total Bytes R:', '0'),
         ]
 
         for i, (key, label_text, default) in enumerate(stats_config):
@@ -558,8 +577,10 @@ class SummaryStatsWidget(QWidget):
         self._snr_samples = 0
         self._sum_ber = 0.0
         self._ber_samples = 0
-        self._frames_total = 0
-        self._frames_lost = 0
+        self._total_bytes = 0
+        self._total_lost_bytes = 0
+        self.total_bytes_l = 0
+        self.total_bytes_r = 0
 
     def update_metrics(self, metrics: dict):
         """Accumulate metrics for summary."""
@@ -591,9 +612,15 @@ class SummaryStatsWidget(QWidget):
                 self._sum_ber += metrics.get('ber', 0)
                 self._ber_samples += 1
 
-            if metrics.get('frames_total') is not None:
-                self._frames_total = metrics.get('frames_total', 0)
-                self._frames_lost = metrics.get('frames_lost', 0)
+            if metrics.get('total_bytes') is not None:
+                self._total_bytes = metrics.get('total_bytes', 0)
+                self._total_lost_bytes = metrics.get('total_lost_bytes', 0)
+            
+            # Track bytes processed
+            if metrics.get('total_bytes_l') is not None:
+                self.total_bytes_l = metrics.get('total_bytes_l', 0)
+            if metrics.get('total_bytes_r') is not None:
+                self.total_bytes_r = metrics.get('total_bytes_r', 0)
 
     def finalize(self):
         """Calculate and display final summary statistics."""
@@ -632,11 +659,17 @@ class SummaryStatsWidget(QWidget):
             avg_ber = self._sum_ber / self._ber_samples
             self.stat_labels['avg_ber'].setText(f"{avg_ber:.4f}")
 
-        if self._frames_total > 0:
-            per = self._frames_lost / self._frames_total
+        if self._total_bytes > 0:
+            per = self._total_lost_bytes / self._total_bytes
             self.stat_labels['total_per'].setText(
-                f"{per:.1%} ({self._frames_lost}/{self._frames_total})"
+                f"{per:.1%} ({self._total_lost_bytes}/{self._total_bytes})"
             )
+        
+        # Display bytes processed
+        if self.total_bytes_l > 0:
+            self.stat_labels['total_bytes_l'].setText(f"{self.total_bytes_l:,}")
+        if self.total_bytes_r > 0:
+            self.stat_labels['total_bytes_r'].setText(f"{self.total_bytes_r:,}")
 
     def _format_bps(self, bps: float) -> str:
         """Format bits per second in human-readable form."""
@@ -661,6 +694,8 @@ class SummaryStatsWidget(QWidget):
                 label.setText('0.0 ms')
             elif 'goodput' in key:
                 label.setText('0 bps')
+            elif 'total_bytes' in key:
+                label.setText('0')
             else:
                 label.setText('-')
 

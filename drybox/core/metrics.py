@@ -100,7 +100,24 @@ class MetricsWriter:
         if typ == "log" and isinstance(payload, dict) and payload.get("level") == "msg":
             print(f"[{side}@{t_ms}ms] {payload.get('msg')}", flush=True)
         
+        # Extract and callback for demod metrics with total_bytes_processed
+        if typ == "metric" and isinstance(payload, dict):
+            event = payload.get("event")
+            if event == "demod":
+                total_bytes = payload.get("total_bytes_processed")
+                if total_bytes is not None and hasattr(self, '_bytes_callback'):
+                    try:
+                        self._bytes_callback(side, total_bytes)
+                    except Exception as e:
+                        pass
+        
         self._events_fp.write(json.dumps(rec) + "\n")
+
+    def set_bytes_callback(self, callback):
+        """Register callback for total_bytes_processed updates.
+        Callback signature: callback(side: str, total_bytes: int)
+        """
+        self._bytes_callback = callback
 
     def close(self) -> None:
         try:

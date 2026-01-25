@@ -35,7 +35,7 @@ class RunnerThread(QThread):
         [  1000 ms] L->R loss=0.000 reord=0.000 jitter=0.0ms | R->L loss=0.000 reord=0.000 jitter=0.0ms | rtt=120ms gp_l=1000bps gp_r=1000bps
 
         Audio mode format:
-        [  1000 ms] Mode B Audio | snr=20.0dB ber=0.0010 per=0.050 frames=50 lost=2
+        [  1000 ms] Mode B Audio | snr=20.0dB ber=0.0010 per=0.050 total_bytes=50 total_lost_bytes=2 total_bytes_l=100 total_bytes_r=200
         """
         # Pattern for byte mode metrics (extended with RTT and goodput)
         byte_pattern = (
@@ -65,12 +65,12 @@ class RunnerThread(QThread):
                 result['goodput_r_bps'] = float(match.group(10))
             return result
 
-        # Pattern for audio mode (extended with SNR, BER, PER, frames)
+        # Pattern for audio mode (extended with SNR, BER, PER, frames, and bytes)
         # SNR can be 'inf' or a number like '20.0'
         audio_pattern = (
             r'\[\s*(\d+)\s*ms\]\s*Mode B Audio'
             r'(?:\s*\|\s*snr=([\d.inf-]+)dB\s+ber=([\d.]+)\s+per=([\d.]+)\s+'
-            r'frames=(\d+)\s+lost=(\d+))?'
+            r'total_bytes=(\d+)\s+total_lost_bytes=(\d+)\s+total_bytes_l=(\d+)\s+total_bytes_r=(\d+))?'
         )
         match = re.search(audio_pattern, line)
         if match:
@@ -90,9 +90,13 @@ class RunnerThread(QThread):
             if match.group(4):
                 result['per'] = float(match.group(4))
             if match.group(5):
-                result['frames_total'] = int(match.group(5))
+                result['total_bytes'] = int(match.group(5))
             if match.group(6):
-                result['frames_lost'] = int(match.group(6))
+                result['total_lost_bytes'] = int(match.group(6))
+            if match.group(7):
+                result['total_bytes_l'] = int(match.group(7))
+            if match.group(8):
+                result['total_bytes_r'] = int(match.group(8))
             return result
 
         return None
