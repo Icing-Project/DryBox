@@ -153,13 +153,28 @@ class RunnerPage(QWidget):
             )
             self.temp_scenario_file = str(scenario_path)
 
+            # === Messages file alongside scenario ===
+            messages_path = output_dir_path / "messages.yaml"
+            messages_data = {
+                "left": self.general_page.get_messages_left(),
+                "right": self.general_page.get_messages_right()
+            }
+            messages_path.write_text(
+                yaml.safe_dump(messages_data, sort_keys=False),
+                encoding="utf-8"
+            )
+            
             # --- LOG THE GENERATED YAML ---
             scenario_contents = scenario_path.read_text(encoding="utf-8")
             self.append_log("Generated scenario.yaml contents:\n" + scenario_contents)
+            
+            messages_contents = messages_path.read_text(encoding="utf-8")
+            self.append_log("Generated messages.yaml contents:\n" + messages_contents)
 
             output_dir = str(output_dir_path)
 
             self.append_log(f"Scenario file: {self.temp_scenario_file}")
+            self.append_log(f"Messages file: {messages_path}")
             self.append_log(f"Left adapter: {left_info.display_name} -> {left_info.spec}")
             self.append_log(f"Right adapter: {right_info.display_name} -> {right_info.spec}")
             self.append_log(f"Output directory: {output_dir}")

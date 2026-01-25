@@ -44,7 +44,7 @@ def test_valid_yaml_defaults_and_resolved_file(tmp_path: pathlib.Path):
 def test_invalid_yaml_raises(tmp_path: pathlib.Path):
     # snr_db doit être number|array[number] ; une string doit invalider
     doc = {
-        "duration_ms": 2000,
+        "duration_ms": 2500,
         "bearer": {"type": "telco_volte_evs"},
         "channel": {"type": "awgn", "snr_db": "bad"},
         "vocoder": {"type": "amr12k2_mock"},
