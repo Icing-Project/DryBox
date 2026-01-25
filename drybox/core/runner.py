@@ -161,6 +161,60 @@ class Runner:
         # Adapters state
         self.handshake_done = False
         self.messages_sent = False
+        self.handshake_complete_time_ms: Optional[int] = None
+        
+        # Message queues (loaded from messages.yaml if exists)
+        # Each message is a dict: {"delay_ms": int, "text": str}
+        self.messages_left: List[Dict[str, Any]] = []
+        self.messages_right: List[Dict[str, Any]] = []
+        self.message_index_left = 0
+        self.message_index_right = 0
+
+    # --------- Load messages from file ----------
+    def _load_messages(self) -> None:
+        """
+        Load messages from messages.yaml in output directory if it exists.
+        Expected format: [{"delay_ms": 0, "text": "Hello"}, ...]
+        """
+        messages_path = self.out_dir / "messages.yaml"
+        if not messages_path.exists():
+            # Fallback to default messages if file doesn't exist
+            self.messages_left = [{"delay_ms": 0, "text": "Hello from L"}]
+            self.messages_right = [{"delay_ms": 0, "text": "Hello from R"}]
+            return
+        
+        try:
+            with open(messages_path, 'r', encoding='utf-8') as f:
+                messages_data = yaml.safe_load(f)
+                self.messages_left = messages_data.get("left", [{"delay_ms": 0, "text": "Hello from L"}])
+                self.messages_right = messages_data.get("right", [{"delay_ms": 0, "text": "Hello from R"}])
+                
+                if not self.messages_left:
+                    self.messages_left = [{"delay_ms": 0, "text": "Hello from L"}]
+                if not self.messages_right:
+                    self.messages_right = [{"delay_ms": 0, "text": "Hello from R"}]
+                    
+                for i, msg in enumerate(self.messages_left):
+                    if isinstance(msg, str):
+                        self.messages_left[i] = {"delay_ms": 0, "text": msg}
+                    elif not isinstance(msg, dict) or "text" not in msg:
+                        self.messages_left[i] = {"delay_ms": 0, "text": str(msg)}
+                    elif "delay_ms" not in msg:
+                        msg["delay_ms"] = 0
+                        
+                for i, msg in enumerate(self.messages_right):
+                    if isinstance(msg, str):
+                        self.messages_right[i] = {"delay_ms": 0, "text": msg}
+                    elif not isinstance(msg, dict) or "text" not in msg:
+                        self.messages_right[i] = {"delay_ms": 0, "text": str(msg)}
+                    elif "delay_ms" not in msg:
+                        msg["delay_ms"] = 0
+                        
+        except Exception as e:
+            # Fallback to default on error
+            print(f"[WARNING] Failed to load messages.yaml: {e}, using defaults", file=sys.stderr)
+            self.messages_left = [{"delay_ms": 0, "text": "Hello from L"}]
+            self.messages_right = [{"delay_ms": 0, "text": "Hello from R"}]
 
     # --------- Chargement / lifecycle ----------
     def _load_adapter(self, spec: str, side: str, crypto_cfg: Dict[str, Any]):
@@ -403,22 +457,55 @@ class Runner:
             )
     
     def _send_msg_if_handshake_is_complete(self, left, right):
+        """Send timed messages based on delay after handshake completion."""
         if not self.handshake_done:
             l_ready = left.is_handshake_complete() if hasattr(left, 'is_handshake_complete') else True
             r_ready = right.is_handshake_complete() if hasattr(right, 'is_handshake_complete') else True
 
             if l_ready and r_ready:
                 self.handshake_done = True
+                self.handshake_complete_time_ms = self.t_ms
+                return
 
-        if self.handshake_done and not self.messages_sent:
-            if hasattr(left, 'send_sdu'):
-                left.send_sdu(b"Hello from L")
-            if hasattr(right, 'send_sdu'):
-                right.send_sdu(b"Hello from R")
-            self.messages_sent = True
+        if not self.handshake_done or self.handshake_complete_time_ms is None:
+            return
+
+        time_since_handshake = self.t_ms - self.handshake_complete_time_ms
+
+        # Check and send left messages
+        if hasattr(left, 'send_sdu'):
+            while self.message_index_left < len(self.messages_left):
+                msg_info = self.messages_left[self.message_index_left]
+                delay_ms = msg_info.get("delay_ms", 0)
+                
+                if time_since_handshake >= delay_ms:
+                    msg_text = msg_info.get("text", "")
+                    left.send_sdu(msg_text.encode('utf-8'))
+                    self.message_index_left += 1
+                else:
+                    break
+                
+        # Check and send right messages
+        if hasattr(right, 'send_sdu'):
+            while self.message_index_right < len(self.messages_right):
+                msg_info = self.messages_right[self.message_index_right]
+                delay_ms = msg_info.get("delay_ms", 0)
+                
+                if time_since_handshake >= delay_ms:
+                    msg_text = msg_info.get("text", "")
+                    right.send_sdu(msg_text.encode('utf-8'))
+                    self.message_index_right += 1
+                else:
+                    break
+        
+        if (self.message_index_left >= len(self.messages_left) and 
+            self.message_index_right >= len(self.messages_right)):
+            if not self.messages_sent:
+                self.messages_sent = True
 
     # --------- Exécution ----------
     def run(self) -> int:
+        self._load_messages()
 
         # --- Résolution des paires de clés ---
         (l_priv, l_pub, l_prov), (r_priv, r_pub, r_prov) = resolve_keypairs(

@@ -1,7 +1,8 @@
 import random
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QFormLayout,
-    QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit, QPushButton, QRadioButton, QButtonGroup
+    QSpinBox, QDoubleSpinBox, QComboBox, QPushButton, 
+    QRadioButton, QButtonGroup, QTextEdit
 )
 
 
@@ -35,7 +36,7 @@ class GeneralPage(QWidget):
         self.duration_spin = QSpinBox()
         self.duration_spin.setRange(0, 50000)
         self.duration_spin.setSingleStep(100)
-        self.duration_spin.setValue(2000)
+        self.duration_spin.setValue(2500)
         basic_layout.addRow("Duration (ms):", self.duration_spin)
 
         # Seed
@@ -103,22 +104,100 @@ class GeneralPage(QWidget):
         self.mtu_spin.setValue(1500)
         network_layout.addRow("MTU bytes:", self.mtu_spin)
 
-        # --- Other box ---
-        other_box = QGroupBox("Other")
-        other_layout = QFormLayout(other_box)
+        # --- Messages Left Adapter box ---
+        messages_left_box = QGroupBox()
+        messages_left_box.setTitle("Messages Left Adapter   (format: +TIME_MS Message)")
+        messages_left_layout = QVBoxLayout(messages_left_box)
         
-         # --- Another box ---
-        another_box = QGroupBox("Another")
-        another_layout = QFormLayout(another_box)
+        self.messages_left_text = QTextEdit()
+        self.messages_left_text.setMinimumHeight(150)
+        self.messages_left_text.setPlainText("+0 Hello from L\n+300 Test message from Left\n+900 Final message L")
+        
+        messages_left_layout.addWidget(self.messages_left_text)
+        
+        # --- Messages Right Adapter box ---
+        messages_right_box = QGroupBox()
+        messages_right_box.setTitle("Messages Right Adapter   (format: +TIME_MS Message)")
+        messages_right_layout = QVBoxLayout(messages_right_box)
+        
+        self.messages_right_text = QTextEdit()
+        self.messages_right_text.setMinimumHeight(150)
+        self.messages_right_text.setPlainText("+0 Hello from R\n+600 Test message from Right\n+1100 Final message R")
+        
+        messages_right_layout.addWidget(self.messages_right_text)
 
         # --- Layout ---
-        left_column.addWidget(basic_box)
-        left_column.addWidget(other_box)
-        right_column.addWidget(network_box)
-        right_column.addWidget(another_box)
+        left_column.addWidget(basic_box, 1)
+        left_column.addWidget(messages_left_box, 1)
 
-        layout.addLayout(left_column)
-        layout.addLayout(right_column)
+        right_column.addWidget(network_box, 1)
+        right_column.addWidget(messages_right_box, 1)
+
+        layout.addLayout(left_column, 1)
+        layout.addLayout(right_column, 1)
+
+    # === Message helpers ===
+    def get_messages_left(self):
+        """Get list of timed messages for left adapter.
+        Returns list of dicts: [{"delay_ms": 0, "text": "Hello"}, ...]
+        """
+        text = self.messages_left_text.toPlainText().strip()
+        if not text:
+            return []
+        
+        messages = []
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Parse format: +TIME_MS Message text
+            if line.startswith('+'):
+                try:
+                    # Find space after time
+                    space_idx = line.find(' ')
+                    if space_idx > 0:
+                        delay_ms = int(line[1:space_idx])
+                        msg_text = line[space_idx+1:].strip()
+                        if msg_text:
+                            messages.append({"delay_ms": delay_ms, "text": msg_text})
+                except ValueError:
+                    # Invalid format, skip this line
+                    continue
+            else:
+                # No timing specified, default to +0
+                messages.append({"delay_ms": 0, "text": line})
+        
+        return messages
+    
+    def get_messages_right(self):
+        """Get list of timed messages for right adapter.
+        Returns list of dicts: [{"delay_ms": 0, "text": "Hello"}, ...]
+        """
+        text = self.messages_right_text.toPlainText().strip()
+        if not text:
+            return []
+        
+        messages = []
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            
+            if line.startswith('+'):
+                try:
+                    space_idx = line.find(' ')
+                    if space_idx > 0:
+                        delay_ms = int(line[1:space_idx])
+                        msg_text = line[space_idx+1:].strip()
+                        if msg_text:
+                            messages.append({"delay_ms": delay_ms, "text": msg_text})
+                except ValueError:
+                    continue
+            else:
+                messages.append({"delay_ms": 0, "text": line})
+        
+        return messages
 
     # === Scenario support ===
     def set_from_scenario(self, scenario: dict):
@@ -137,6 +216,28 @@ class GeneralPage(QWidget):
         self.ge_good_bad_spin.setValue(network.get("ge_p_good_bad", 0.001))
         self.ge_bad_good_spin.setValue(network.get("ge_p_bad_good", 0.1))
         self.mtu_spin.setValue(network.get("mtu_bytes", 1500))
+        
+        messages = scenario.get("messages", {})
+        if "left" in messages:
+            lines = []
+            for msg in messages["left"]:
+                if isinstance(msg, dict):
+                    delay = msg.get("delay_ms", 0)
+                    text = msg.get("text", "")
+                    lines.append(f"+{delay} {text}")
+                else:
+                    lines.append(str(msg))
+            self.messages_left_text.setPlainText('\n'.join(lines))
+        if "right" in messages:
+            lines = []
+            for msg in messages["right"]:
+                if isinstance(msg, dict):
+                    delay = msg.get("delay_ms", 0)
+                    text = msg.get("text", "")
+                    lines.append(f"+{delay} {text}")
+                else:
+                    lines.append(str(msg))
+            self.messages_right_text.setPlainText('\n'.join(lines))
 
     def to_dict(self):
         mode = "byte" if self.mode_byte.isChecked() else "audio"
@@ -153,5 +254,9 @@ class GeneralPage(QWidget):
                 "ge_p_good_bad": round(self.ge_good_bad_spin.value(), 4),
                 "ge_p_bad_good": round(self.ge_bad_good_spin.value(), 4),
                 "mtu_bytes": self.mtu_spin.value()
+            },
+            "messages": {
+                "left": self.get_messages_left(),
+                "right": self.get_messages_right()
             }
         }

@@ -24,7 +24,7 @@ class RunnerThread(QThread):
             import yaml
             with open(self.scenario_path, 'r') as f:
                 scenario = yaml.safe_load(f)
-                return scenario.get('duration_ms', 2000)
+                return scenario.get('duration_ms', 2500)
         except:
             return 5000
 
