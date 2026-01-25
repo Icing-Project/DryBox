@@ -274,10 +274,20 @@ class Runner:
             return
 
         pcm_processed = pcm
+        
+        # DEBUG: Log amplitude at each stage
+        if self.t_ms % 500 == 0:
+            import numpy as np
+            tx_max = np.max(np.abs(pcm)) if pcm is not None else 0
+            print(f"[TRACE] {flow.label} t={self.t_ms}ms TX_amp={tx_max}", end="")
 
         # Apply channel
         if flow.channel is not None:
             pcm_processed = flow.channel.apply(pcm)
+            if self.t_ms % 500 == 0:
+                import numpy as np
+                ch_max = np.max(np.abs(pcm_processed))
+                print(f" → CH_amp={ch_max}", end="")
             if hasattr(flow.channel, "get_estimated_snr"):
                 snr_est = flow.channel.get_estimated_snr(pcm, pcm_processed)
                 self.metrics.write_metric(
@@ -288,6 +298,11 @@ class Runner:
 
         # Apply vocoder + loss
         pcm_processed = self._apply_vocoder_and_loss(pcm_processed, flow)
+        
+        if self.t_ms % 500 == 0:
+            import numpy as np
+            voc_max = np.max(np.abs(pcm_processed)) if pcm_processed is not None else 0
+            print(f" → VOC_amp={voc_max}")
 
         # Deliver
         self._safe_call(f"{flow.label} audio pull", flow.dst.pull_rx_block, pcm_processed, self.t_ms)

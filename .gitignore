@@ -7,3 +7,5 @@ drybox.egg-info
 .vscode
 .claude
 runs
+*.log
+rx_output*.wav
