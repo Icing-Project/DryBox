@@ -249,6 +249,35 @@ class TestAudioCaptureWriter:
                 duration_seconds = total_samples / SAMPLE_RATE
                 assert abs(duration_seconds - 10.0) < 0.1  # Within 100ms
 
+    def test_audio_capture_invalid_side(self):
+        """Test that invalid side labels are handled gracefully."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_dir = Path(tmpdir) / "audio"
+            writer = AudioCaptureWriter(audio_dir)
+
+            # Write with invalid side labels (should be silently ignored with warning)
+            pcm_data = np.random.randint(-32768, 32767, size=BLOCK_SIZE, dtype=np.int16)
+            writer.write_tx("l", pcm_data, t_ms=0)  # Invalid: should be "left"
+            writer.write_tx("r", pcm_data, t_ms=0)  # Invalid: should be "right"
+            writer.write_rx("L", pcm_data, t_ms=0)  # Invalid: should be "left"
+            writer.write_rx("R", pcm_data, t_ms=0)  # Invalid: should be "right"
+
+            # Write with valid side labels
+            writer.write_tx("left", pcm_data, t_ms=0)
+            writer.write_tx("right", pcm_data, t_ms=0)
+
+            writer.close()
+
+            # Verify only valid writes were captured
+            left_tx_path = audio_dir / "left_tx.wav"
+            right_tx_path = audio_dir / "right_tx.wav"
+
+            with wave.open(str(left_tx_path), "rb") as wav:
+                assert wav.getnframes() == BLOCK_SIZE  # Only one valid write
+
+            with wave.open(str(right_tx_path), "rb") as wav:
+                assert wav.getnframes() == BLOCK_SIZE  # Only one valid write
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

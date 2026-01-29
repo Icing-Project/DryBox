@@ -365,6 +365,10 @@ class Runner:
         elif side == "R":
             self.total_bytes_r = total_bytes
 
+    def _side_to_full_name(self, side: str) -> str:
+        """Convert side label 'L'/'R' to full name 'left'/'right' for audio capture."""
+        return "left" if side == "L" else "right"
+
     def _process_audio_direction(self, flow: AudioFlow, rtt_est: float) -> Optional[Dict[str, Any]]:
         """Process audio in one direction and return metrics dict for UI tracking."""
         pcm = self._safe_call(f"{flow.label} audio push", flow.src.push_tx_block, self.t_ms)
@@ -373,7 +377,7 @@ class Runner:
 
         # Capture TX audio (before processing)
         if self.audio_writer:
-            self.audio_writer.write_tx(flow.tx_side.lower(), pcm, self.t_ms)
+            self.audio_writer.write_tx(self._side_to_full_name(flow.tx_side), pcm, self.t_ms)
 
         result_metrics: Dict[str, Any] = {'frame_lost': False, 'snr_db': None, 'ber': None}
         pcm_processed = pcm
@@ -400,7 +404,7 @@ class Runner:
 
         # Capture RX audio (after processing)
         if self.audio_writer:
-            self.audio_writer.write_rx(flow.rx_side.lower(), pcm_processed, self.t_ms)
+            self.audio_writer.write_rx(self._side_to_full_name(flow.rx_side), pcm_processed, self.t_ms)
 
         # Deliver
         self._safe_call(f"{flow.label} audio pull", flow.dst.pull_rx_block, pcm_processed, self.t_ms)

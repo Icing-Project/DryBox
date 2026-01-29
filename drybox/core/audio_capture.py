@@ -90,6 +90,8 @@ class AudioCaptureWriter:
                 self.wav_files[key].writeframes(pcm.tobytes())
             except Exception as e:
                 logger.warning(f"Failed to write {key} audio at t={t_ms}ms: {e}")
+        else:
+            logger.warning(f"Invalid side '{side}' for audio TX capture (expected 'left' or 'right')")
 
     def write_rx(self, side: str, pcm: np.ndarray, t_ms: int):
         """
@@ -110,6 +112,8 @@ class AudioCaptureWriter:
                 self.wav_files[key].writeframes(pcm.tobytes())
             except Exception as e:
                 logger.warning(f"Failed to write {key} audio at t={t_ms}ms: {e}")
+        else:
+            logger.warning(f"Invalid side '{side}' for audio RX capture (expected 'left' or 'right')")
 
     def close(self):
         """
