@@ -46,6 +46,7 @@ EVENT_TICK = "tick"
 # --- Dépendances locales ---
 from drybox.core.metrics import MetricsWriter  # A1
 from drybox.core.capture import DbxCapWriter  # A1
+from drybox.core.audio_capture import AudioCaptureWriter  # Audio WAV export
 from drybox.core.adapter_registry import load_adapter_class
 from drybox.core.scenario import (  # A2
     ScenarioResolved,
@@ -150,6 +151,17 @@ class Runner:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.metrics = MetricsWriter(self.out_dir / "metrics.csv", self.out_dir / "events.jsonl")
         self.cap = DbxCapWriter(self.out_dir / "capture.dbxcap")
+
+        # Audio capture (automatic in audio mode)
+        self.audio_writer = None
+        if self.scenario.mode == "audio":
+            try:
+                self.audio_writer = AudioCaptureWriter(self.out_dir / "audio")
+            except OSError as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to initialize audio capture: {e}. Continuing without audio export.")
+                self.audio_writer = None
 
         # Horloge logique
         self.t_ms: int = 0
@@ -359,6 +371,10 @@ class Runner:
         if pcm is None or pcm.size == 0:
             return None
 
+        # Capture TX audio (before processing)
+        if self.audio_writer:
+            self.audio_writer.write_tx(flow.tx_side.lower(), pcm, self.t_ms)
+
         result_metrics: Dict[str, Any] = {'frame_lost': False, 'snr_db': None, 'ber': None}
         pcm_processed = pcm
 
@@ -381,6 +397,10 @@ class Runner:
         # Apply vocoder + loss
         pcm_processed, frame_lost = self._apply_vocoder_and_loss_tracked(pcm_processed, flow)
         result_metrics['frame_lost'] = frame_lost
+
+        # Capture RX audio (after processing)
+        if self.audio_writer:
+            self.audio_writer.write_rx(flow.rx_side.lower(), pcm_processed, self.t_ms)
 
         # Deliver
         self._safe_call(f"{flow.label} audio pull", flow.dst.pull_rx_block, pcm_processed, self.t_ms)
@@ -766,6 +786,8 @@ class Runner:
                         pass
             self.metrics.close()
             self.cap.close()
+            if self.audio_writer:
+                self.audio_writer.close()
 
 
 # --------- CLI ----------
