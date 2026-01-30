@@ -19,6 +19,14 @@ Its purpose is solely for core/protocol logic development and troubleshooting.
 The audio block mode on the other hand, transmits C-contiguous int16 arrays from one side to the other, as a - currently - fixed and continuous mono 8 kHz, 16 bits depth audio stream.
 This method is much closer to the real-world environment, and enables true FEC / Modem logic development.
 
+**Audio Export Feature**: When running in audio mode, DryBox automatically exports all adapter audio as WAV files to an `audio/` subdirectory within the run output folder. This includes:
+- `left_tx.wav` - Left adapter transmit audio (before processing)
+- `left_rx.wav` - Left adapter receive audio (after processing)
+- `right_tx.wav` - Right adapter transmit audio (before processing)
+- `right_rx.wav` - Right adapter receive audio (after processing)
+
+All exported WAV files are in standard format: 8kHz sample rate, mono, 16-bit PCM. These files can be played back in any standard audio player (VLC, Audacity, etc.) for analysis and verification.
+
 ## How to use it ?
 
 The DryBox works both on Linux and Windows, but the Nade-Python package currently only supports Linux.

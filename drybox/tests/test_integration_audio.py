@@ -318,3 +318,124 @@ class TestAudioIntegration:
         assert rc == 0
         assert out_dir.exists()
         assert (out_dir / "metrics.csv").exists()
+
+    def test_audio_export_end_to_end(self, temp_dir):
+        """Test end-to-end audio export to WAV files"""
+        scenario = {
+            "mode": "audio",
+            "duration_ms": 1000,  # 1 second
+            "seed": 42,
+            "network": {
+                "bearer": "volte_evs",
+                "latency_ms": 20,
+                "jitter_ms": 5,
+                "loss_rate": 0.01,
+            },
+            "left": {
+                "modem": {
+                    "channel_type": "awgn",
+                    "snr_db": 20.0,
+                    "vocoder": "evs13k2_mock",
+                    "vad_dtx": False
+                }
+            },
+            "right": {
+                "modem": {}
+            }
+        }
+
+        scenario_path = pathlib.Path(temp_dir) / "export_scenario.yaml"
+        with open(scenario_path, "w") as f:
+            yaml.dump(scenario, f)
+
+        out_dir = pathlib.Path(temp_dir) / "run_export"
+
+        runner = Runner(
+            scenario=ScenarioResolved.from_yaml(scenario_path),
+            left_adapter_spec="adapters/audio_test.py:AudioTestAdapter",
+            right_adapter_spec="adapters/audio_test.py:AudioTestAdapter",
+            out_dir=out_dir,
+            tick_ms=1,  # 1ms ticks for continuous audio
+            seed=42,
+            ui_enabled=False
+        )
+
+        rc = runner.run()
+        assert rc == 0
+
+        # Check that audio folder was created
+        audio_dir = out_dir / "audio"
+        assert audio_dir.exists(), "audio/ directory should be created"
+        assert audio_dir.is_dir(), "audio/ should be a directory"
+
+        # Check that all 4 WAV files were created
+        expected_files = ["left_tx.wav", "left_rx.wav", "right_tx.wav", "right_rx.wav"]
+        for filename in expected_files:
+            filepath = audio_dir / filename
+            assert filepath.exists(), f"Expected file {filename} not found"
+            assert filepath.stat().st_size > 0, f"File {filename} should not be empty"
+
+        # Verify WAV file format and playability
+        import wave
+        for filename in expected_files:
+            filepath = audio_dir / filename
+            with wave.open(str(filepath), "rb") as wav:
+                # Check format
+                assert wav.getnchannels() == 1, f"{filename}: Expected mono audio"
+                assert wav.getsampwidth() == 2, f"{filename}: Expected 16-bit samples"
+                assert wav.getframerate() == 8000, f"{filename}: Expected 8kHz sample rate"
+
+                # Check that frames were written
+                num_frames = wav.getnframes()
+                assert num_frames > 0, f"{filename}: No audio frames written"
+
+                # Verify duration matches simulation (approximately)
+                duration_seconds = num_frames / 8000.0
+                expected_duration = 1.0  # 1000ms
+                # Allow some tolerance for tick alignment
+                assert 0.8 <= duration_seconds <= 1.2, \
+                    f"{filename}: Duration {duration_seconds}s doesn't match expected ~{expected_duration}s"
+
+                # Verify we can read the data
+                frames = wav.readframes(num_frames)
+                assert len(frames) == num_frames * 2, f"{filename}: Frame data size mismatch"
+
+                # Convert to numpy and check it's valid audio data
+                audio_data = np.frombuffer(frames, dtype=np.int16)
+                assert len(audio_data) == num_frames, f"{filename}: Audio data length mismatch"
+                assert audio_data.dtype == np.int16, f"{filename}: Audio data should be int16"
+
+    def test_audio_export_byte_mode_skipped(self, temp_dir):
+        """Verify that audio export is NOT created in byte mode"""
+        scenario = {
+            "mode": "byte",  # byte mode, not audio
+            "duration_ms": 500,
+            "seed": 42,
+            "network": {
+                "bearer": "ott_udp",
+                "latency_ms": 20,
+            }
+        }
+
+        scenario_path = pathlib.Path(temp_dir) / "byte_scenario.yaml"
+        with open(scenario_path, "w") as f:
+            yaml.dump(scenario, f)
+
+        out_dir = pathlib.Path(temp_dir) / "run_byte"
+
+        runner = Runner(
+            scenario=ScenarioResolved.from_yaml(scenario_path),
+            left_adapter_spec="adapters/test_traffic_adapter.py:TestTrafficAdapter",
+            right_adapter_spec="adapters/test_traffic_adapter.py:TestTrafficAdapter",
+            out_dir=out_dir,
+            tick_ms=1,
+            seed=42,
+            ui_enabled=False
+        )
+
+        rc = runner.run()
+        assert rc == 0
+
+        # Verify audio folder was NOT created in byte mode
+        audio_dir = out_dir / "audio"
+        assert not audio_dir.exists(), "audio/ directory should NOT be created in byte mode"

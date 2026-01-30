@@ -86,12 +86,41 @@ ls runs/test1/
 # metrics.csv      - All metrics data
 # events.jsonl     - Event log
 # capture.dbxcap   - Packet capture
+# audio/           - Exported audio WAV files (audio mode only)
 ```
 
 View metrics:
 ```bash
 head runs/test1/metrics.csv
 ```
+
+### Audio Export (Audio Mode Only)
+
+When running in audio mode, DryBox automatically exports all adapter audio to `audio/` subdirectory:
+
+```bash
+ls runs/test1/audio/
+# left_tx.wav   - Left adapter transmit (before processing)
+# left_rx.wav   - Left adapter receive (after processing)
+# right_tx.wav  - Right adapter transmit (before processing)
+# right_rx.wav  - Right adapter receive (after processing)
+```
+
+All files are standard WAV format (8kHz, mono, 16-bit PCM) and can be played in any audio player:
+
+```bash
+# Play with sox (Linux)
+play runs/test1/audio/left_tx.wav
+
+# Or open in Audacity/VLC for visual analysis
+audacity runs/test1/audio/left_tx.wav
+```
+
+**Use cases:**
+- **Compare TX vs RX**: Hear channel/vocoder degradation by comparing `left_tx.wav` with `right_rx.wav`
+- **Debug audio issues**: Verify adapters are generating correct audio
+- **Quality assessment**: Listen to codec/channel effects
+- **Artifact analysis**: Open in Audacity to visualize dropouts, noise, distortion
 
 ## 5. Common Configurations
 
