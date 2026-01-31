@@ -1,41 +1,51 @@
 # DryBox v2 scenario.yaml
-
 mode: audio                 # "byte" or "audio"
-duration_ms: 5000           # integer, milliseconds
-seed: 123456                # integer, random by default
-
+duration_ms: 2500           # integer, milliseconds
+seed: 174005                # integer, random by default
 # --- Network settings (shared link) ---
 network:
   bearer: volte_evs          # "volte_evs", "cs_gsm", "pstn_g711", "ott_udp"
-  loss_rate: 0.00            # float, 0.0 to 1.0
+  loss_rate: 0.0             # float, 0.0 to 1.0
   latency_ms: 20             # integer
   jitter_ms: 5               # integer
-  reorder_rate: 0.00         # float
+  reorder_rate: 0.0          # float
   ge_p_good_bad: 0.001       # float
   ge_p_bad_good: 0.1         # float
   mtu_bytes: 1500            # integer
-
+messages:
+  left:
+    - delay_ms: 0
+      text: Hello from L
+    - delay_ms: 300
+      text: Test message from Left
+    - delay_ms: 900
+      text: Final message L
+  right:
+    - delay_ms: 0
+      text: Hello from R
+    - delay_ms: 600
+      text: Test message from Right
+    - delay_ms: 1100
+      text: Final message R
 # --- Left Adapter ---
 left:
   adapter: nade_adapter.py    # file in adapters folder
-  gain: 1.0                   # float
-  setting2: ""                # text input
+  gain: 1.0                         # float
   modem:
-    vocoder: none             # "none", "amr12k2_mock", "evs13k2_mock", "opus_nb_mock"
-    vad_dtx: false            # boolean
-    channel_type: none        # "none", "awgn", "fading"
-    snr_db: 20                # integer
-    doppler_hz: 50            # max Doppler frequency in Hz
-    num_paths: 8              # number of multipath components
-
+    vocoder: amr12k2_mock           # "none", "amr12k2_mock", "evs13k2_mock", "opus_nb_mock"
+    vad_dtx: false                  # boolean
+    channel_type: awgn              # "none", "awgn", "fading"
+    snr_db: 20                      # integer
+    doppler_hz: 50                  # max Doppler frequency in Hz
+    num_paths: 8                    # number of multipath components
 # --- Right Adapter ---
 right:
   adapter: nade_adapter.py
   gain: 1.0
   modem:
-    vocoder: none
+    vocoder: amr12k2_mock
     vad_dtx: false
-    channel_type: none
+    channel_type: awgn
     snr_db: 20
     doppler_hz: 50
     num_paths: 8
