@@ -101,8 +101,13 @@ class RunnerPage(QWidget):
         )
 
     # === Runner logic ===
-    def run_scenario(self):
-        """Start scenario using RunnerThread"""
+    def run_scenario(self) -> bool:
+        """Start scenario using RunnerThread.
+
+        Returns:
+            True if a runner thread was started, False otherwise.
+        """
+        self.runner_thread = None
         self.log_text.clear()
         self.progress_bar.setValue(0)
         self.progress_bar.show()
@@ -193,11 +198,14 @@ class RunnerPage(QWidget):
             self.runner_thread.finished_signal.connect(self.on_run_finished)
             self.runner_thread.metrics_signal.connect(self._on_metrics_update)
             self.runner_thread.start()
+            return True
 
         except Exception as e:
             self.append_log(f"Error starting scenario: {e}")
+            self.runner_thread = None
             self.progress_bar.hide()
             self.status_label.setText("Error")
+            return False
 
 
     def stop_scenario(self):
