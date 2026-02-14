@@ -55,14 +55,13 @@ class MainWindow(QMainWindow):
 
         # Right side: Run / Stop / Scenario menu
         self.btn_run = QPushButton("Run")
-        self.btn_run.setCheckable(True)
         self.btn_run.clicked.connect(self.on_run_clicked)
         navbar_layout.addWidget(self.btn_run)
 
         self.btn_stop = QPushButton("Stop")
-        self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.on_stop_clicked)
         navbar_layout.addWidget(self.btn_stop)
+        self._set_run_controls(running=False)
 
         self.btn_scenario = QPushButton("☰")
         menu = QMenu(self)
@@ -90,23 +89,30 @@ class MainWindow(QMainWindow):
         self.action_save_as.triggered.connect(self.save_scenario_as)
 
     # === Run / Stop logic ===
-    def on_run_clicked(self, checked: bool):
-        if checked:
-            self.btn_run.setEnabled(False)
-            self.btn_stop.setEnabled(True)
-            self.stack.setCurrentWidget(self.runner_page)
-            self.runner_page.run_scenario()
-            if self.runner_page.runner_thread:
-                self.runner_page.runner_thread.finished_signal.connect(self.on_runner_finished)
+    def _set_run_controls(self, running: bool):
+        """Set Run/Stop control state based on runner activity."""
+        self.btn_run.setEnabled(not running)
+        # Defensive reset if checkable is reintroduced in the future.
+        if self.btn_run.isCheckable():
+            self.btn_run.setChecked(False)
+        self.btn_stop.setEnabled(running)
+
+    def on_run_clicked(self):
+        self.stack.setCurrentWidget(self.runner_page)
+        started = self.runner_page.run_scenario()
+        runner_thread = self.runner_page.runner_thread
+        if started and runner_thread:
+            self._set_run_controls(running=True)
+            runner_thread.finished_signal.connect(self.on_runner_finished)
+            return
+        self._set_run_controls(running=False)
 
     def on_stop_clicked(self):
         self.runner_page.stop_scenario()
-        self.btn_run.setEnabled(True)
-        self.btn_stop.setEnabled(False)
+        self._set_run_controls(running=False)
 
     def on_runner_finished(self, exit_code: int):
-        self.btn_run.setEnabled(True)
-        self.btn_stop.setEnabled(False)
+        self._set_run_controls(running=False)
 
     # === Scenario handling ===
     def load_scenario(self):
